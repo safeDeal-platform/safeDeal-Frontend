@@ -41,4 +41,6 @@
 
 팀원이 GitHub **Settings → Applications → Authorized GitHub Apps**에서 위임을 철회하거나, 운영자가 `node tools/ai-review/main.mjs revoke <github-user-id>`를 실행하면 이후 리뷰가 중단됩니다. 개별 PR에서 요청을 철회하거나 팀원이 직접 리뷰를 제출해도 해당 자동 흐름이 멈춥니다. 다시 사용하려면 리뷰를 새로 요청합니다.
 
+주문 필터 시범 PR은 알려진 단일 테스트 파일 전체를 확인한 뒤, 로그인 계정과 소유자가 같은 주문과 다른 주문을 각각 대입해 판정합니다. 코드 구조가 다르거나 다른 변경이 함께 있으면 일반 Ollama 검토를 사용합니다.
+
 로컬 검증: `node --test tools/ai-review/*.test.mjs`. 실제 GitHub App 설치와 계정 동의, Ollama 모델 정확도, GitHub 리뷰 제출은 시범 운영에서 확인합니다.

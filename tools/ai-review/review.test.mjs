@@ -95,6 +95,47 @@ test('a refuted legacy P1 on the same head can be approved after an explicit rer
   assert.deepEqual(posted[0].comments, [])
 })
 
+test('the complete pilot fixture is checked against both owners, including after a model-verified false block', async () => {
+  const prelude = ['type Order = {', '  id: string', '  ownerId: string', '  deliveryAddress: string', '}', '',
+    "// The account's order history must only show the signed-in buyer's orders."]
+  const filename = 'src/review-pilot.ts'
+  const samples = [
+    { event: 'APPROVE', lines: [
+      'export const visibleOrders = (history: readonly Order[], accountId: string): Order[] =>',
+      '  history.filter(({ ownerId }) => accountId === ownerId)',
+    ] },
+    { event: 'REQUEST_CHANGES', lines: [
+      'export function visibleOrders(orders: readonly Order[], viewerId: string): Order[] {',
+      '  return orders.filter((order) => order.ownerId !== viewerId)',
+      '}',
+    ] },
+    { event: 'COMMENT', lines: [
+      'export const visibleOrders = (history: readonly Order[], accountId: string): Order[] =>',
+      '  history.filter(({ ownerId }) => accountId === ownerId)',
+      'export const unrelated = readOtherOrders()',
+    ] },
+  ]
+  for (const { event, lines } of samples) {
+    const source = [...prelude, ...lines]
+    const patch = ['@@ -0,0 +1,' + source.length + ' @@', ...source.map(line => '+' + line)].join('\n')
+    const pilot = { filename, status: 'added', additions: source.length, deletions: 0, patch }
+    const prior = makeReview(pr, route, { verdict: 'BLOCK', p1Verified: true, findings: [{ ...p1,
+      path: filename, side: 'RIGHT', line: 9, evidence: lines[1].trim(),
+    }] }, opts)
+    // Simulate an already-posted model result, without the new proof marker.
+    const { io, posted } = harness({
+      files: async () => [pilot],
+      reviews: async () => [{ ...prior, id: 11, user: { id: route.reviewer }, state: 'CHANGES_REQUESTED' }],
+      analyze: async () => { throw new Error('the proof should use the patch') },
+    })
+    await reviewRoute(io, route, opts)
+    assert.equal(posted[0]?.event, event)
+    assert.equal(posted[0].comments.length, event === 'REQUEST_CHANGES' ? 1 : 0)
+    if (event === 'COMMENT') assert.match(posted[0].body, /팀원 검토/)
+    else assert.match(posted[0].body, /계정 일치·불일치 검증/)
+  }
+})
+
 test('uncertain, ungrounded or incomplete P1 checks never produce an approval', async () => {
   const checks = [
     { verdict: 'uncertain', evidence: 'new()', reason: 'The behavior is unclear.' },

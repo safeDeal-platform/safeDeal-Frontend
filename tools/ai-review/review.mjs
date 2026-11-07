@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { checkPilot, PILOT_PATH } from './pilot.mjs'
 
 export const MAX_FILES = 20
 const MAX_PATCH_BYTES = 24_000
@@ -136,6 +137,7 @@ export function makeReview(pr, route, result, opts) {
   const metadata = Buffer.from(JSON.stringify({
     base: pr.base.sha, retry: !!reason, overflow: !!result.overflow || unique.size > 24,
     p1Verified: result.p1Verified === true,
+    pilotChecked: result.pilotChecked === true,
     blockers: [...unique.values()].slice(0, 24),
   })).toString('base64url')
   return {
@@ -143,6 +145,7 @@ export function makeReview(pr, route, result, opts) {
     event,
     body: '**' + verdict + '** · SafeDeal AI 위임 리뷰\n\n'
       + (reason ?? ('P1 ' + p1 + '건 · P2 ' + (findings.length - p1) + '건'
+        + (result.pilotChecked ? ' · 시범 코드 계정 일치·불일치 검증' : '')
         + (event === 'COMMENT' ? ' · 자동 승인 비활성' : '')
         + (result.partial ? '\n\n검토가 일부만 완료됐으며, 확인된 P1 때문에 변경을 요청합니다.' : '')))
       + '\n\n<!-- safedeal-ai-review:' + metadata + ':' + markerMac(route, pr.head.sha, metadata, opts.secret) + ' -->',
@@ -169,7 +172,8 @@ async function reviewState(io, pr, route, secret) {
   const latest = reviews.filter(r => r.user?.id === route.reviewer && r.state !== 'PENDING').at(-1)
   const previous = priorResult(latest, route, secret)
   const requested = users.some(user => user.id === route.reviewer)
-  const legacyBlock = latest?.state === 'CHANGES_REQUESTED' && !previous?.p1Verified
+  const legacyPilotBlock = !previous?.pilotChecked && previous?.blockers?.some(([path]) => path === PILOT_PATH)
+  const legacyBlock = latest?.state === 'CHANGES_REQUESTED' && (!previous?.p1Verified || legacyPilotBlock)
   if (previous?.base === pr.base.sha && latest.commit_id === pr.head.sha
     && !(requested && (previous.retry || legacyBlock))) return null
   return requested || (previous && ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED'].includes(latest.state))
@@ -260,14 +264,17 @@ export async function reviewRoute(io, route, opts) {
     } else {
       try {
         inspect(pr, files)
-        try {
-          result = classify(pr, files, await io.analyze(files))
-        } catch {
+        result = checkPilot(files, openBlockers(previous, files, pr.base.sha), previous?.overflow)
+        if (!result) {
+          try {
+            result = classify(pr, files, await io.analyze(files))
+          } catch {
+            if (!io.active(route)) return 'superseded'
+            result = classify(pr, files, await io.analyze(files, true))
+          }
           if (!io.active(route)) return 'superseded'
-          result = classify(pr, files, await io.analyze(files, true))
+          await verifyBlockers(io, route, pr, files, result, previous, latest)
         }
-        if (!io.active(route)) return 'superseded'
-        await verifyBlockers(io, route, pr, files, result, previous, latest)
       } catch {
         result = hold('변경분 또는 모델 응답을 검증할 수 없습니다. 팀원 검토가 필요합니다.')
       }
