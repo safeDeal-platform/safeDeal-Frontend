@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
 import { test } from 'node:test'
-import { analyzeLocal, githubApp, localizeFindings, tokenGrant } from './clients.mjs'
+import { analyzeLocal, githubApp, localizeFindings, tokenGrant, updateQuickWebhook } from './clients.mjs'
 
 test('a repository client restricts installation tokens and checks write access on the destination repository', async t => {
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -23,6 +23,32 @@ test('a repository client restricts installation tokens and checks write access 
   await assert.rejects(gh.identity('user-token'), /write access/)
   await gh.submit('user-token', 2, {})
   assert.match(fetch.mock.calls.at(-1).arguments[0], /safeDeal-Backend\/pulls\/2\/reviews$/)
+})
+
+test('webhook setup replaces only a Quick Tunnel URL and keeps the existing webhook secret', async t => {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const current = { url: 'https://old.trycloudflare.com/webhook', content_type: 'json', insecure_ssl: '0' }
+  const fetch = t.mock.method(globalThis, 'fetch', async (_url, request) => {
+    if (request.method === 'PATCH') return Response.json(JSON.parse(request.body))
+    return Response.json(current)
+  })
+  const app = { appId: 42, privateKey }
+  const target = new URL('https://new.trycloudflare.com/webhook')
+  await updateQuickWebhook(app, target)
+  const [url, request] = fetch.mock.calls[1].arguments
+  assert.equal(url, 'https://api.github.com/app/hook/config')
+  assert.equal(request.method, 'PATCH')
+  assert.deepEqual(JSON.parse(request.body), { url: target.href, content_type: 'json', insecure_ssl: '0' })
+  const [, payload] = request.headers.authorization.slice(7).split('.')
+  assert.equal(JSON.parse(Buffer.from(payload, 'base64url')).iss, 42)
+
+  current.url = target.href
+  await updateQuickWebhook(app, target)
+  assert.equal(fetch.mock.calls.length, 3)
+  current.url = 'https://review.example.org/webhook'
+  await assert.rejects(updateQuickWebhook(app, target), /non-Quick Tunnel/)
+  await assert.rejects(updateQuickWebhook(app, new URL('https://evil.trycloudflare.com.example.org/webhook')), /expected/i)
+  assert.equal(fetch.mock.calls.length, 4)
 })
 
 test('Ollama receives patches only through its loopback API and truncated output fails closed', async t => {

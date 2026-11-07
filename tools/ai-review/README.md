@@ -32,6 +32,16 @@
 
 조직 전체를 적용하려면 조직 소유자가 [설치된 App의 저장소 접근 설정](https://docs.github.com/en/apps/using-github-apps/reviewing-and-modifying-installed-github-apps#modifying-repository-access)에서 **All repositories**를 선택합니다. 기존 설치에서 변경하며 같은 설치 ID, 웹훅 URL, 환경 파일과 상태 DB를 사용합니다. 환경 파일에 `REVIEW_SCOPE=organization`을 추가하고 재시작합니다. Frontend 이외의 저장소에서는 팀원이 최종 승인합니다.
 
+## Windows에서 한 번에 실행
+
+관리자 PC에서 설치와 팀원 위임을 마친 뒤 `tools\ai-review\start-review.cmd`를 실행합니다. 기본 설정 파일은 소스 폴더 바로 위의 `review.env`입니다. 다른 위치의 환경 파일을 사용하면 첫 인수로 파일 경로를 전달합니다. 첫 실행 전에 수동으로 켜둔 리뷰 봇과 Quick Tunnel 창을 종료합니다.
+
+실행기는 Ollama가 응답하지 않으면 시작하고, 모델이 있는지 확인합니다. 리뷰 봇과 [Cloudflare Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)을 실행한 뒤 공개 웹훅이 서명된 요청을 받을 수 있는지 확인합니다. 연결을 확인하면 GitHub App의 웹훅 주소를 새 터널 주소로 갱신합니다. GitHub App이 고정 도메인이나 다른 터널을 사용 중이면 주소 갱신을 중단합니다.
+
+Node.js와 `cloudflared`가 PATH에 있어야 합니다. Ollama는 Windows 기본 설치 위치와 PATH를 확인합니다. 별도 위치에 설치한 경우 `review.env`에 `REVIEW_CLOUDFLARED_EXE`, `REVIEW_OLLAMA_EXE`로 각 실행 파일의 경로를 지정합니다. 모델 다운로드와 팀원 위임은 최초 설정에서 한 번 진행합니다.
+
+`[SafeDeal] Ready. GitHub webhook`이 표시되면 창을 열어둡니다. `Ctrl+C`로 실행기가 시작한 프로세스를 종료합니다. 관리자 PC가 꺼져 있으면 리뷰 봇도 중지됩니다.
+
 ## 팀원 동의와 시범 운영
 
 운영자는 서버에서 `node tools/ai-review/main.mjs enroll <github-login>`을 실행합니다. 해당 팀원이 운영자와 확인한 일회용 코드를 직접 [GitHub 기기 인증 화면](https://github.com/login/device)에 입력하고 App에 동의합니다. 호스트 접근권한이나 비밀 키를 팀원에게 공유할 필요가 없습니다. 서비스가 GitHub 계정을 확인하면 위임을 기록합니다. GitHub의 [사용자 위임 인증](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-with-a-github-app-on-behalf-of-a-user)을 사용합니다.

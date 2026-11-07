@@ -15,15 +15,41 @@ async function json(url, options = {}, timeout = 20_000) {
   return response.json()
 }
 
-export function github(token, path, payload) {
+export function github(token, path, payload, method = payload ? 'POST' : 'GET') {
   return json('https://api.github.com' + path, {
-    method: payload ? 'POST' : 'GET',
+    method,
     headers: {
       accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28',
       authorization: 'Bearer ' + token, 'content-type': 'application/json',
     },
     body: payload ? JSON.stringify(payload) : undefined,
   })
+}
+
+function appJwt({ appId, privateKey }) {
+  const now = Math.floor(Date.now() / 1000)
+  const claims = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({ iss: appId, iat: now - 60, exp: now + 480 })
+  return claims + '.' + createSign('RSA-SHA256').update(claims).sign(privateKey, 'base64url')
+}
+
+const quickHost = /^[a-z\d-]+\.trycloudflare\.com$/i
+
+export async function updateQuickWebhook(app, target) {
+  if (target.protocol !== 'https:' || !quickHost.test(target.host)
+    || target.pathname !== '/webhook' || target.username || target.password || target.search || target.hash) {
+    throw new Error('Expected an HTTPS Cloudflare Quick Tunnel webhook URL')
+  }
+  const jwt = appJwt(app)
+  const path = '/app/hook/config'
+  const current = await github(jwt, path)
+  if (current.url && !quickHost.test(new URL(current.url).host)) {
+    throw new Error('GitHub App webhook already uses a non-Quick Tunnel address. Check the App settings before switching it.')
+  }
+  if (current.url === target.href && current.content_type === 'json' && String(current.insecure_ssl) === '0') return
+  const updated = await github(jwt, path, { url: target.href, content_type: 'json', insecure_ssl: '0' }, 'PATCH')
+  if (updated.url !== target.href || updated.content_type !== 'json' || String(updated.insecure_ssl) !== '0') {
+    throw new Error('GitHub did not confirm the new webhook settings')
+  }
 }
 
 export async function githubUser(token) {
@@ -38,9 +64,7 @@ export function githubApp({ appId, installationId, privateKey, repoId, repositor
   let installation
   async function appToken() {
     if (installation?.expires > Date.now() + 60_000) return installation.token
-    const now = Math.floor(Date.now() / 1000)
-    const claims = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({ iss: appId, iat: now - 60, exp: now + 480 })
-    const jwt = claims + '.' + createSign('RSA-SHA256').update(claims).sign(privateKey, 'base64url')
+    const jwt = appJwt({ appId, privateKey })
     const { token, expires_at } = await github(jwt, '/app/installations/' + installationId + '/access_tokens', {
       repository_ids: [repoId], permissions: { contents: 'read', pull_requests: 'read' },
     })
