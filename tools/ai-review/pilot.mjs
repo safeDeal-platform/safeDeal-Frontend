@@ -37,6 +37,7 @@ export function checkPilot(files, remaining, overflow) {
     severity: 'P1', path: PILOT_PATH, side: 'RIGHT', line: 9, evidence: body.trim(),
     title: '다른 계정의 주문이 노출됩니다',
     detail: '계정 A로 조회하면 소유자 A의 주문은 제외되고 소유자 B의 주문은 반환됩니다.',
+    suggestion: '소유자 비교를 일치 조건으로 바꾸고, 계정 A가 A의 주문만 받는지 서로 다른 두 소유자의 주문으로 테스트하세요.',
   }]
   return {
     verdict: findings.length ? 'BLOCK' : 'PASS',

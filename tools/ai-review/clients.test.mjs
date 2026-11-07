@@ -36,6 +36,7 @@ test('Ollama receives patches only through its loopback API and truncated output
   const body = JSON.parse(request.body)
   assert.equal(body.stream, false)
   assert.equal(body.tools, undefined)
+  assert.ok(body.format.properties.findings.items.required.includes('suggestion'))
   assert.deepEqual(JSON.parse(body.messages[1].content), [
     { filename: files[0].filename, patch: '@@ -4,1 +4,1 @@\nLEFT 4: -old()\nRIGHT 4: +unsafe()' },
   ])
@@ -64,17 +65,21 @@ test('English finding prose is translated without sending or replacing its code 
     severity: 'P1', path: 'src/review-pilot.ts', side: 'RIGHT', line: 9,
     evidence: 'order.ownerId !== viewerId',
     title: 'Inverted owner check', detail: 'The filter exposes another buyer’s orders.',
+    suggestion: 'Keep only orders with a matching owner ID.',
   }
-  const korean = { ...original, title: '기존 한글 제목', detail: '이미 한국어인 설명입니다.' }
+  const korean = { ...original, title: '기존 한글 제목', detail: '이미 한국어인 설명입니다.', suggestion: '소유자가 같은 주문만 조회합니다.' }
   const title = '주문 소유자 비교 조건 반전'
   const detail = '다른 구매자의 주문이 노출됩니다.'
-  const result = { translations: [{ id: 1, title, detail, severity: 'P2', line: 10 }] }
+  const suggestion = '조회 계정과 소유자가 일치하는 주문만 남기세요.'
+  const result = { translations: [{ id: 1, title, detail, suggestion, severity: 'P2', line: 10 }] }
   const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json({
     done: true, done_reason: 'stop', message: { content: JSON.stringify(result) },
   }))
-  assert.deepEqual(await localizeFindings('test-model', [korean, original]), [korean, { ...original, title, detail }])
+  assert.deepEqual(await localizeFindings('test-model', [korean, original]), [korean, { ...original, title, detail, suggestion }])
   const request = JSON.parse(fetch.mock.calls[0].arguments[1].body)
-  assert.deepEqual(JSON.parse(request.messages[1].content), [{ id: 1, title: original.title, detail: original.detail }])
+  assert.deepEqual(JSON.parse(request.messages[1].content), [
+    { id: 1, title: original.title, detail: original.detail, suggestion: original.suggestion },
+  ])
   result.translations[0].title = 'Still English'
   assert.deepEqual(await localizeFindings('test-model', [korean, original]), [korean, original])
   await localizeFindings('test-model', [korean])

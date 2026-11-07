@@ -9,7 +9,8 @@ const base = 'b'.repeat(40)
 const pr = { state: 'open', draft: false, changed_files: 1, user: { id: 100 },
   head: { sha: head, repo: { id: 1 } }, base: { sha: base, ref: 'dev', repo: { id: 1 } } }
 const route = { number: 4, reviewer: 9, generation: 1 }
-const p1 = { severity: 'P1', path: file.filename, line: 4, evidence: 'new()', title: 'Wrong handler', detail: 'Checkout no longer completes.' }
+const p1 = { severity: 'P1', path: file.filename, line: 4, evidence: 'new()', title: 'Wrong handler',
+  detail: 'Checkout no longer completes.', suggestion: 'Restore the checkout handler and test a completed purchase.' }
 const model = (...findings) => ({ complete: true, findings })
 const opts = { secret: 'test-secret', repoId: 1, autoApprove: true }
 
@@ -31,6 +32,9 @@ test('P1 blocks and P2 is advisory, with precise inline comments', () => {
   assert.deepEqual(review.comments.map(({ path, line, side }) => ({ path, line, side })), [
     { path: 'src/App.tsx', line: 4, side: 'RIGHT' },
   ])
+  assert.match(review.comments[0].body, /\*\*문제와 영향\*\*\n\nCheckout no longer completes\./)
+  assert.match(review.comments[0].body, /\*\*코드 근거\*\*\n\n> new\(\)/)
+  assert.match(review.comments[0].body, /\*\*수정 제안\*\*\n\nRestore the checkout handler/)
   assert.equal(makeReview(pr, route, result, { ...opts, autoApprove: false }).event, 'COMMENT')
 })
 
@@ -38,6 +42,7 @@ test('invalid model data, fabricated lines and incomplete diffs cannot pass', ()
   assert.throws(() => classify(pr, [file], { complete: false, findings: [] }))
   assert.throws(() => classify(pr, [file], { complete: false, findings: [{ ...p1, severity: 'P2' }] }))
   assert.throws(() => classify(pr, [file], { findings: [p1] }))
+  assert.throws(() => classify(pr, [file], model({ ...p1, suggestion: ' ' })))
   assert.throws(() => classify(pr, [file], model({ ...p1, line: 5, evidence: 'new(' })))
   assert.throws(() => classify(pr, [{ ...file, additions: 2, patch: file.patch + '\n+new()' }],
     model({ ...p1, line: 8 })))
@@ -181,6 +186,7 @@ test('a P1 verified against the patch blocks even when model coverage is incompl
     severity: 'P1', path: changed.filename, side: 'RIGHT', line: 9, evidence,
     title: "Inverted owner check that selects other users' records",
     detail: "The function shows other users' orders instead of the signed-in buyer's orders.",
+    suggestion: 'Keep only the orders whose owner ID matches the signed-in buyer ID.',
   }
   const { io, posted } = harness({
     files: async () => [changed],
@@ -316,6 +322,7 @@ test('backend Java source and tests are reviewed together and remain comment-onl
   await reviewRoute(io, { ...route, frontend: false, repoId: 1 }, { ...opts, frontend: false })
   assert.equal(posted[0].event, 'COMMENT')
   assert.match(posted[0].body, /AI 검토 완료 2\/2개 파일/)
+  assert.match(posted[0].body, /확인된 지적 · P1 0건 · P2 0건/)
 })
 
 test('documentation in another repository can be reviewed against its default branch', async () => {

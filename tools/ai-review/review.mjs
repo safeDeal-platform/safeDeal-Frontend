@@ -96,8 +96,8 @@ export function classify(pr, files, result) {
     const side = f?.side ?? 'RIGHT'
     if (!['P1', 'P2'].includes(f?.severity) || !['LEFT', 'RIGHT'].includes(side)
       || !Number.isSafeInteger(f.line) || f.line < 1 || !validText(f.evidence, 250)
-      || !validText(f.title, 120) || !validText(f.detail, 600)) {
-      throw new Error('Finding has no valid changed-line evidence')
+      || !validText(f.title, 120) || !validText(f.detail, 600) || !validText(f.suggestion, 400)) {
+      throw new Error('Finding is missing valid evidence, detail or a suggested fix')
     }
     const line = evidenceLine(anchors.get(f.path), side, f.line, f.evidence)
     if (line === null) throw new Error('Finding has no valid changed-line evidence')
@@ -158,7 +158,10 @@ export function makeReview(pr, route, result, opts) {
       + '\n\n<!-- safedeal-ai-review:' + metadata + ':' + markerMac(route, pr.head.sha, metadata, opts.secret) + ' -->',
     comments: findings.map(f => ({
       path: f.path, line: f.line, side: f.side,
-      body: '**[' + f.severity + '] ' + clean(f.title) + '**\n\n' + clean(f.detail),
+      body: '**[' + f.severity + '] ' + clean(f.title) + '**'
+        + '\n\n**문제와 영향**\n\n' + clean(f.detail)
+        + '\n\n**코드 근거**\n\n> ' + clean(f.evidence)
+        + '\n\n**수정 제안**\n\n' + clean(f.suggestion),
     })),
   }
 }
@@ -385,7 +388,7 @@ async function reviewBatches(io, route, pr, files, hold) {
     + (unreviewed.length ? '미완료·제외 파일 ' + unreviewed.length + '개'
       + ' (' + unreviewed.slice(0, 6).map(f => clean(f.filename)).join(', ')
       + (unreviewed.length > 6 ? ', …' : '') + ')\n\n' : '')
-    + (findings.length ? 'P1 ' + priority.length + '건 · P2 ' + (findings.length - priority.length) + '건'
+    + (batches.length ? '확인된 지적 · P1 ' + priority.length + '건 · P2 ' + (findings.length - priority.length) + '건'
       + (findings.length > 12 ? ' · 최대 12건 표시' : '') + '\n\n' : '')
     + '여러 묶음 또는 자동 승인 범위 밖 변경은 팀원 검토가 필요합니다.',
   )
