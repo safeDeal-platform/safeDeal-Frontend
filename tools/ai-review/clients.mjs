@@ -159,6 +159,7 @@ export async function analyzeLocal(model, files, retry = false) {
       'A user receiving another account’s private records (such as orders, addresses, or payment data) is always P1.',
       'An inverted owner check that selects other users’ records is a concrete authorization defect, not P2.',
       'P2 means a concrete non-blocking defect. Do not report stylistic or speculative issues.',
+      'For tests, check assertions and behavior coverage. For configuration or dependency changes, look for demonstrated build or runtime regressions. For documentation, report instructions that contradict supplied evidence.',
       'Use one finding per changed line. Copy the supplied path, side and line number from the patch labels.',
       'For evidence copy the changed code verbatim, excluding the label and the + or - diff prefix.',
       'Write both title and detail in Korean (ko-KR). Keep identifiers and evidence unchanged.',
