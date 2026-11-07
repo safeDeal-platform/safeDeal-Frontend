@@ -221,6 +221,7 @@ export async function reviewRoute(io, route, opts) {
       }
     }
   }
+  if (result.findings.length) result.findings = await io.localize(result.findings)
   const token = await io.grant(route.reviewer)
   if (!token) return 'not-enrolled'
   const end = await reviewState(io, pr, route, opts.secret)

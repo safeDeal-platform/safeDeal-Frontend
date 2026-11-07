@@ -54,6 +54,7 @@ function harness(overrides = {}) {
     reviews: async () => [],
     files: async () => [file],
     analyze: async () => model(p1),
+    localize: async findings => findings,
     grant: async () => 'fake-token',
     active: () => active,
     submit: async (token, number, review) => posted.push({ token, number, ...review }),

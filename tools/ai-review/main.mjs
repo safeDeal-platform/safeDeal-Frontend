@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { analyzeLocal, enrollDevice, githubApp, refreshGrant } from './clients.mjs'
+import { analyzeLocal, enrollDevice, githubApp, localizeFindings, refreshGrant } from './clients.mjs'
 import { reviewRoute } from './review.mjs'
 import { openState } from './state.mjs'
 import { webhookServer } from './webhook.mjs'
@@ -74,6 +74,7 @@ async function serve(config, gh, state) {
     ...gh,
     active: state.active,
     analyze: (files, retry) => analyzeLocal(model, files, retry),
+    localize: findings => localizeFindings(model, findings),
     async grant(reviewer) {
       let current = state.getGrant(reviewer)
       if (!current) return null
