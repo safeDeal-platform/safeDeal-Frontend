@@ -303,6 +303,47 @@ test('changes to the review automation are held for manual review', async () => 
   assert.match(posted[0].body, /BLOCK/)
 })
 
+test('project configuration, documentation and tests are reviewed but require a team member to approve', async () => {
+  const paths = [
+    '.env.example', '.gitignore', 'README.md', 'docs/setup.md', 'e2e/marketplace.spec.ts',
+    'index.html', 'package.json', 'package-lock.json', 'playwright.config.ts',
+    'test/api.test.ts', 'src/auth.test.ts', 'src/__tests__/auth.ts',
+    'tsconfig.json', 'vite.config.ts', 'vitest.config.ts',
+  ]
+  for (const filename of paths) {
+    const { io, posted } = harness({
+      files: async () => [{ ...file, filename }],
+      analyze: async batch => {
+        assert.deepEqual(batch.map(f => f.filename), [filename])
+        return model()
+      },
+    })
+    await reviewRoute(io, route, opts)
+    assert.equal(posted[0].event, 'COMMENT', filename)
+    assert.match(posted[0].body, /\*\*REVIEW\*\*.*\n\nAI 검토 완료 1\/1개 파일/, filename)
+  }
+})
+
+test('real environment files and files renamed from them are excluded from model input', async () => {
+  const files = [
+    { ...file, filename: '.env.local' },
+    { ...file, filename: '.env.example', previous_filename: '.env' },
+    { ...file, filename: 'README.md' },
+  ]
+  const { io, posted } = harness({
+    pr: async () => ({ ...pr, changed_files: files.length }),
+    files: async () => files,
+    analyze: async batch => {
+      assert.deepEqual(batch.map(f => f.filename), ['README.md'])
+      return model()
+    },
+  })
+  await reviewRoute(io, route, opts)
+  assert.equal(posted[0].event, 'COMMENT')
+  assert.match(posted[0].body, /AI 검토 완료 1\/3개 파일/)
+  assert.match(posted[0].body, /미완료·제외 파일 2개/)
+})
+
 test('a large source file is split at changed lines and mixed changes are reviewed without approval', async () => {
   const longLine = 'x'.repeat(13_000)
   const large = { ...file, additions: 3, deletions: 1,
@@ -321,11 +362,11 @@ test('a large source file is split at changed lines and mixed changes are review
   })
   await reviewRoute(io, route, opts)
   assert.equal(calls.length, 2)
-  assert.ok(calls.every(batch => batch.length === 1 && batch[0].filename === large.filename))
+  assert.deepEqual(calls.flatMap(batch => batch.map(f => f.filename)), [large.filename, large.filename, config.filename])
   assert.equal(posted[0].event, 'COMMENT')
   assert.deepEqual(posted[0].comments.map(comment => [comment.path, comment.side, comment.line]), [[large.filename, 'RIGHT', 12]])
-  assert.match(posted[0].body, /1\/2개 파일 · 2\/2개 묶음 완료/)
-  assert.match(posted[0].body, /미완료·제외 파일 1개 \(package\.json\)/)
+  assert.match(posted[0].body, /\*\*BLOCK\*\*/)
+  assert.match(posted[0].body, /2\/2개 파일 · 2\/2개 묶음 완료/)
 })
 
 test('a failed batch is reported as incomplete and does not discard findings from another batch', async () => {

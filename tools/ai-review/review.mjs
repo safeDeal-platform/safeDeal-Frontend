@@ -166,13 +166,25 @@ export function eligible(pr, route, repoId) {
     && pr.base.ref === 'dev' && SHA.test(pr.base.sha) && SHA.test(pr.head.sha)
 }
 
-function allowedPath(path) {
-  return typeof path === 'string' && /^src\/.+\.(?:[cm]?[jt]sx?|css|scss)$/.test(path)
-    && path.split('/').every(part => part && part !== '.' && part !== '..')
+const projectFiles = new Set(['.env.example', '.gitignore', 'index.html', 'package.json', 'package-lock.json'])
+const sourcePath = /^src\/.+\.(?:[cm]?[jt]sx?|css|scss)$/
+const testPath = /^(?:e2e|tests?)\/.+\.[cm]?[jt]sx?$|^src\/(?:.*\/)?__tests__\/.+\.[cm]?[jt]sx?$|^src\/.+\.(?:test|spec)\.[cm]?[jt]sx?$/
+const docsPath = /^(?:docs\/.+|[^/]+)\.md$/i
+const configPath = /^(?:tsconfig(?:\.[\w-]+)?\.json|(?:vite|vitest|playwright|eslint|prettier|postcss|tailwind)\.config\.[cm]?[jt]s)$/
+
+function allowedPaths(file, match) {
+  return [file.filename, file.previous_filename ?? file.filename].every(path =>
+    typeof path === 'string' && path.split('/').every(part => part && part !== '.' && part !== '..')
+    && match(path))
 }
 
 function reviewablePath(file) {
-  return allowedPath(file.filename) && (!file.previous_filename || allowedPath(file.previous_filename))
+  return allowedPaths(file, path => sourcePath.test(path) || testPath.test(path) || docsPath.test(path)
+    || projectFiles.has(path) || configPath.test(path))
+}
+
+function autoApprovablePath(file) {
+  return allowedPaths(file, path => sourcePath.test(path) && !testPath.test(path))
 }
 
 function splitPatch(file) {
@@ -373,6 +385,7 @@ async function reviewBatches(io, route, pr, files, hold) {
   )
   result.findings = [...priority, ...findings.filter(f => f.severity === 'P2')].slice(0, 12)
   result.blockers = [...(result.blockers ?? []), ...priority.map(f => [f.path, f.side, f.evidence])]
+  if (!unreviewed.length && !priority.length) result.verdict = 'REVIEW'
   return result
 }
 
@@ -394,7 +407,7 @@ export async function reviewRoute(io, route, opts) {
     const files = await io.files(route.number, pr)
     if (files.length !== pr.changed_files || new Set(files.map(file => file.filename)).size !== files.length) {
       result = hold('변경 파일 목록을 전부 확인할 수 없습니다. 팀원 검토가 필요합니다.')
-    } else if (files.some(file => !reviewablePath(file) || typeof file.patch !== 'string')
+    } else if (files.some(file => !autoApprovablePath(file) || typeof file.patch !== 'string')
       || files.reduce((bytes, file) => bytes + patchBytes(file), 0) > MAX_PATCH_BYTES) {
       result = await reviewBatches(io, route, pr, files, hold)
       if (!result) return 'superseded'
