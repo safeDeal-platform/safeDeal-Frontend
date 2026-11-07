@@ -276,6 +276,23 @@ test('forks, self approval and human override are ignored', async () => {
   }
 })
 
+test('100 small source files can be reviewed and 101 are held for manual review', async () => {
+  const files = Array.from({ length: 100 }, (_, i) => ({ ...file, filename: 'src/change-' + i + '.ts' }))
+  const { io, posted } = harness({
+    pr: async () => ({ ...pr, changed_files: files.length }),
+    files: async () => files,
+    analyze: async () => model(),
+  })
+  await reviewRoute(io, route, opts)
+  assert.equal(posted[0].event, 'APPROVE')
+
+  io.pr = async () => ({ ...pr, changed_files: 101 })
+  io.files = async () => assert.fail('an oversized PR should not fetch its changes')
+  await reviewRoute(io, route, opts)
+  assert.equal(posted[1].event, 'COMMENT')
+  assert.match(posted[1].body, /101개로 검토 상한 100개/)
+})
+
 test('changes to the review automation are held for manual review', async () => {
   const { io, posted } = harness({
     files: async () => [{ ...file, filename: 'tools/ai-review/review.mjs' }],

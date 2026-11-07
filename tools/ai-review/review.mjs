@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { checkPilot, PILOT_PATH } from './pilot.mjs'
 
-export const MAX_FILES = 20
+export const MAX_FILES = 100
 const MAX_PATCH_BYTES = 24_000
 const SHA = /^[0-9a-f]{40}$/
 
@@ -256,7 +256,7 @@ export async function reviewRoute(io, route, opts) {
   })
   let result
   if (pr.changed_files > MAX_FILES) {
-    result = hold('변경 파일이 너무 많습니다. 팀원 검토가 필요합니다.')
+    result = hold(`변경 파일이 ${pr.changed_files}개로 검토 상한 ${MAX_FILES}개를 넘었습니다. 팀원 검토가 필요합니다.`)
   } else {
     const files = await io.files(route.number, pr)
     if (files.some(file => !allowedPath(file.filename) || (file.previous_filename && !allowedPath(file.previous_filename)))) {
