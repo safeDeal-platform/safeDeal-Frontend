@@ -111,9 +111,9 @@ export async function refreshGrant(clientId, refresh) {
 }
 
 const schema = {
-  type: 'object', additionalProperties: false, required: ['complete', 'findings'],
+  type: 'object', additionalProperties: false, required: ['coverage', 'findings'],
   properties: {
-    complete: { type: 'boolean' },
+    coverage: { enum: ['all_supplied_patches_reviewed', 'unable_to_review_all_patches'] },
     findings: {
       type: 'array', maxItems: 12, items: {
         type: 'object', additionalProperties: false,
@@ -143,8 +143,10 @@ export async function analyzeLocal(model, files, retry = false) {
           'P2 means a concrete non-blocking defect. Do not report stylistic or speculative issues.',
           'Use one finding per changed line. Copy the supplied path, side and line number from the patch labels.',
           'For evidence copy the changed code verbatim, excluding the label and the + or - diff prefix.',
-          'Explain the trigger and impact in Korean. Set complete=true once you inspected all supplied patches, even if you found defects.',
-          'Use complete=false only when you were unable to inspect all supplied patches. A patch adding a standalone file can be complete.',
+          'Explain the trigger and impact in Korean. Coverage describes how much input you inspected, independent of defects.',
+          'Use coverage "all_supplied_patches_reviewed" after inspecting every supplied patch, including a single standalone file.',
+          'Use "unable_to_review_all_patches" only if you could not inspect some of the supplied input.',
+          'For fully reviewed changes with no findings, return {"coverage":"all_supplied_patches_reviewed","findings":[]}.',
           retry ? 'The previous result was invalid or incomplete. Inspect every patch again and check each finding against its exact labels before answering.' : '',
         ].join(' ') },
         { role: 'user', content: JSON.stringify(files.map(({ filename, patch }) => ({ filename, patch: numberedPatch(patch) }))) },
@@ -153,5 +155,9 @@ export async function analyzeLocal(model, files, retry = false) {
   }, 240_000)
   if (response.done !== true || response.done_reason !== 'stop' || typeof response.message?.content !== 'string'
     || response.message.tool_calls?.length) throw new Error('Local model response incomplete')
-  return JSON.parse(response.message.content)
+  const result = JSON.parse(response.message.content)
+  if (result?.coverage !== 'all_supplied_patches_reviewed' && result?.coverage !== 'unable_to_review_all_patches') {
+    throw new Error('Invalid model review coverage')
+  }
+  return { complete: result.coverage === 'all_supplied_patches_reviewed', findings: result.findings }
 }

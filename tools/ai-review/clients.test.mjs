@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { analyzeLocal, tokenGrant } from './clients.mjs'
 
 test('Ollama receives patches only through its loopback API and truncated output fails closed', async t => {
-  const response = { done: true, done_reason: 'stop', message: { content: '{"complete":true,"findings":[]}' } }
+  const response = { done: true, done_reason: 'stop', message: { content: '{"coverage":"all_supplied_patches_reviewed","findings":[]}' } }
   const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json(response))
   const patch = '@@ -4,1 +4,1 @@\n-old()\n+unsafe()'
   const files = [{ filename: 'src/fixture.ts', patch, unrelated: 'not sent' }]
@@ -19,6 +19,10 @@ test('Ollama receives patches only through its loopback API and truncated output
   assert.match(body.messages[0].content, /another account’s private records .* always P1/)
   await analyzeLocal('test-model', files, true)
   assert.match(JSON.parse(fetch.mock.calls[1].arguments[1].body).messages[0].content, /previous result was invalid or incomplete/)
+  response.message.content = '{"coverage":"unable_to_review_all_patches","findings":[]}'
+  assert.deepEqual(await analyzeLocal('test-model', files), { complete: false, findings: [] })
+  response.message.content = '{"findings":[]}'
+  await assert.rejects(analyzeLocal('test-model', files), /coverage/)
   response.done_reason = 'length'
   await assert.rejects(analyzeLocal('test-model', files), /incomplete/)
 })

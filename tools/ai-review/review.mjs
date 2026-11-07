@@ -83,7 +83,7 @@ function evidenceLine(lines, side, line, evidence) {
 
 export function classify(pr, files, result) {
   const anchors = inspect(pr, files)
-  if (result?.complete !== true || !Array.isArray(result.findings) || result.findings.length > 12) {
+  if (typeof result?.complete !== 'boolean' || !Array.isArray(result.findings) || result.findings.length > 12) {
     throw new Error('Invalid or incomplete model review')
   }
   const findings = result.findings.map(f => {
@@ -100,7 +100,9 @@ export function classify(pr, files, result) {
   if (new Set(findings.map(f => JSON.stringify([f.path, f.side, f.line]))).size !== findings.length) {
     throw new Error('Duplicate review locations')
   }
-  return { verdict: findings.some(f => f.severity === 'P1') ? 'BLOCK' : 'PASS', findings }
+  const blocking = findings.some(f => f.severity === 'P1')
+  if (!result.complete && !blocking) throw new Error('Invalid or incomplete model review')
+  return { verdict: blocking ? 'BLOCK' : 'PASS', findings, partial: !result.complete }
 }
 
 function markerMac(route, head, payload, secret) {
@@ -140,7 +142,8 @@ export function makeReview(pr, route, result, opts) {
     event,
     body: '**' + verdict + '** · SafeDeal AI 위임 리뷰\n\n'
       + (reason ?? ('P1 ' + p1 + '건 · P2 ' + (findings.length - p1) + '건'
-        + (event === 'COMMENT' ? ' · 자동 승인 비활성' : '')))
+        + (event === 'COMMENT' ? ' · 자동 승인 비활성' : '')
+        + (result.partial ? '\n\n검토가 일부만 완료됐으며, 확인된 P1 때문에 변경을 요청합니다.' : '')))
       + '\n\n<!-- safedeal-ai-review:' + metadata + ':' + markerMac(route, pr.head.sha, metadata, opts.secret) + ' -->',
     comments: findings.map(f => ({
       path: f.path, line: f.line, side: f.side,
@@ -201,9 +204,8 @@ export async function reviewRoute(io, route, opts) {
     } else {
       try {
         inspect(pr, files)
-        const first = await io.analyze(files)
         try {
-          result = classify(pr, files, first)
+          result = classify(pr, files, await io.analyze(files))
         } catch {
           if (!io.active(route)) return 'superseded'
           result = classify(pr, files, await io.analyze(files, true))

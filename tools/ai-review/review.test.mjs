@@ -36,6 +36,8 @@ test('P1 blocks and P2 is advisory, with precise inline comments', () => {
 
 test('invalid model data, fabricated lines and incomplete diffs cannot pass', () => {
   assert.throws(() => classify(pr, [file], { complete: false, findings: [] }))
+  assert.throws(() => classify(pr, [file], { complete: false, findings: [{ ...p1, severity: 'P2' }] }))
+  assert.throws(() => classify(pr, [file], { findings: [p1] }))
   assert.throws(() => classify(pr, [file], model({ ...p1, line: 5, evidence: 'new(' })))
   assert.throws(() => classify(pr, [{ ...file, additions: 2, patch: file.patch + '\n+new()' }],
     model({ ...p1, line: 8 })))
@@ -79,6 +81,25 @@ test('an incomplete review is retried once and exact evidence anchors the correc
   assert.deepEqual(attempts, [false, true])
   assert.equal(posted[0].event, 'REQUEST_CHANGES')
   assert.equal(posted[0].comments[0].line, 9)
+})
+
+test('a P1 verified against the patch blocks even when model coverage is incomplete', async () => {
+  const evidence = 'return orders.filter((order) => order.ownerId !== viewerId)'
+  const changed = { filename: 'src/review-pilot.ts', additions: 1, deletions: 0, patch: '@@ -8,0 +9,1 @@\n+  ' + evidence }
+  const finding = {
+    severity: 'P1', path: changed.filename, side: 'RIGHT', line: 9, evidence,
+    title: "Inverted owner check that selects other users' records",
+    detail: "The function shows other users' orders instead of the signed-in buyer's orders.",
+  }
+  const { io, posted } = harness({
+    files: async () => [changed],
+    analyze: async () => ({ complete: false, findings: [finding] }),
+  })
+  await reviewRoute(io, route, opts)
+  assert.equal(posted[0].event, 'REQUEST_CHANGES')
+  assert.match(posted[0].body, /검토가 일부만 완료/)
+  assert.equal(posted[0].comments[0].line, 9)
+  assert.throws(() => classify(pr, [changed], { complete: false, findings: [{ ...finding, evidence: 'fabricated()' }] }))
 })
 
 test('assignment blocks on P1; a new commit can be approved after the request disappears', async () => {
