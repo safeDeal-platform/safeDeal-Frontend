@@ -1,19 +1,25 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
+import { mkdtempSync, rmSync, rmdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { openState } from './state.mjs'
 import { eventFor, webhookServer } from './webhook.mjs'
 import { signWebhook } from './review.mjs'
 
 const config = { repoId: 15, installationId: 8, webhookSecret: 'test-only-secret' }
+const scope = { repoId: 15, repository: 'safeDeal-Frontend', number: 2 }
 const payload = {
-  action: 'review_requested', number: 2, repository: { id: 15 }, installation: { id: 8 },
+  action: 'review_requested', number: 2,
+  repository: { id: 15, name: scope.repository, owner: { login: 'safeDeal-platform' } }, installation: { id: 8 },
   pull_request: { base: { ref: 'dev', repo: { id: 15 } }, head: { repo: { id: 15 } }, user: { id: 1 } },
   requested_reviewer: { type: 'User', id: 7 },
 }
 
 test('webhook only tracks individual, same-repository dev assignments', () => {
-  assert.deepEqual(eventFor('pull_request', payload, config), { kind: 'assign', number: 2, reviewer: 7 })
+  assert.deepEqual(eventFor('pull_request', payload, config), { kind: 'assign', ...scope, reviewer: 7 })
   assert.equal(eventFor('pull_request', { ...payload, installation: { id: 1 } }, config), null)
   assert.equal(eventFor('pull_request', { ...payload, requested_reviewer: null }, config), null)
   const wrong = structuredClone(payload)
@@ -26,10 +32,25 @@ test('webhook only tracks individual, same-repository dev assignments', () => {
     { kind: 'revoke', reviewer: 7 })
 })
 
+test('organization scope accepts another installed repository and rejects another organization', () => {
+  const backend = structuredClone(payload)
+  backend.repository.id = backend.pull_request.base.repo.id = backend.pull_request.head.repo.id = 19
+  backend.repository.name = 'safeDeal-Backend'
+  const organization = { ...config, organizationScope: true }
+  assert.equal(eventFor('pull_request', backend, config), null)
+  assert.deepEqual(eventFor('pull_request', backend, organization),
+    { kind: 'assign', repoId: 19, repository: 'safeDeal-Backend', number: 2, reviewer: 7 })
+  backend.repository.name = 'safeDeal-Docs'
+  backend.repository.default_branch = backend.pull_request.base.ref = 'main'
+  assert.equal(eventFor('pull_request', backend, organization).repository, 'safeDeal-Docs')
+  backend.repository.owner.login = 'other-org'
+  assert.equal(eventFor('pull_request', backend, organization), null)
+})
+
 test('queue deduplicates signed deliveries and survives review/update/removal sequencing', () => {
   const db = openState(':memory:', Buffer.alloc(32, 1))
   try {
-    const assign = { kind: 'assign', number: 2, reviewer: 7 }
+    const assign = { kind: 'assign', ...scope, reviewer: 7 }
     db.receive('0', assign, 1)
     assert.equal(db.next(1), undefined)
     db.enroll(7, { token: 'user-token', refresh: 'refresh-token' })
@@ -40,7 +61,7 @@ test('queue deduplicates signed deliveries and survives review/update/removal se
     const old = db.next(1)
     db.finish(old)
     assert.equal(db.next(1), undefined)
-    db.receive('2', { kind: 'update', number: 2 }, 2)
+    db.receive('2', { kind: 'update', ...scope }, 2)
     const next = db.next(2)
     assert.equal(next.reviewer, 7)
     assert.equal(db.active(old), false)
@@ -52,6 +73,30 @@ test('queue deduplicates signed deliveries and survives review/update/removal se
     assert.equal(db.getGrant(7), null)
   } finally {
     db.close()
+  }
+})
+
+test('legacy frontend routes migrate and matching backend PR numbers stay independent', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'safedeal-review-'))
+  const path = join(directory, 'state.db')
+  const original = new DatabaseSync(path)
+  original.exec('CREATE TABLE routes (number INTEGER, reviewer INTEGER, generation TEXT, due INTEGER, attempts INTEGER)')
+  original.prepare('INSERT INTO routes VALUES (?, ?, ?, ?, ?)').run(2, 7, 'frontend-generation', 1, 0)
+  original.close()
+  const db = openState(path, Buffer.alloc(32, 1), scope.repoId)
+  try {
+    db.enroll(7, { token: 'user-token', organization: true })
+    const frontend = db.next(1)
+    assert.equal(frontend.repoId, scope.repoId)
+    assert.equal(frontend.repository, scope.repository)
+    db.receive('backend', { kind: 'assign', repoId: 19, repository: 'safeDeal-Backend', number: 2, reviewer: 7 }, 1)
+    db.receive('frontend-close', { kind: 'close', ...scope }, 1)
+    assert.equal(db.active(frontend), false)
+    assert.equal(db.next(1).repoId, 19)
+  } finally {
+    db.close()
+    rmSync(path, { force: true })
+    rmdirSync(directory)
   }
 })
 
@@ -71,7 +116,7 @@ test('HTTP webhook persists only verified deliveries', async () => {
     assert.equal((await request('sha256=incorrect')).status, 401)
     assert.equal((await request(signWebhook(config.webhookSecret, body))).status, 202)
     assert.deepEqual(seen, [[
-      '83ec679d-3b05-42be-b84a-1b1c3a63c1a3', { kind: 'assign', number: 2, reviewer: 7 },
+      '83ec679d-3b05-42be-b84a-1b1c3a63c1a3', { kind: 'assign', ...scope, reviewer: 7 },
     ]])
   } finally {
     server.close()
