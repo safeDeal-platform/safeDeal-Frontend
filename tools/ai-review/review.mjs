@@ -3,7 +3,9 @@ import { checkPilot, PILOT_PATH } from './pilot.mjs'
 
 export const MAX_FILES = 100
 const MAX_PATCH_BYTES = 24_000
+const MAX_BATCHES = 12
 const SHA = /^[0-9a-f]{40}$/
+const HUNK = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
 
 export function signWebhook(secret, body) {
   return 'sha256=' + createHmac('sha256', secret).update(body).digest('hex')
@@ -18,7 +20,7 @@ function* patchLines(patch) {
   if (typeof patch !== 'string') throw new Error('Missing patch')
   let left = 0, right = 0
   for (const text of patch.split('\n')) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text)
+    const hunk = HUNK.exec(text)
     if (hunk) {
       left = Number(hunk[1])
       right = Number(hunk[2])
@@ -56,6 +58,8 @@ function changedLines(file) {
   return lines
 }
 
+const patchBytes = file => Buffer.byteLength(file.patch) + Buffer.byteLength(file.filename)
+
 function inspect(pr, files) {
   if (!Array.isArray(files) || files.length !== pr.changed_files || files.length < 1 || files.length > MAX_FILES) {
     throw new Error('Unsupported diff size')
@@ -65,7 +69,7 @@ function inspect(pr, files) {
   for (const file of files) {
     if (typeof file.filename !== 'string' || anchors.has(file.filename)) throw new Error('Invalid patch path')
     const lines = changedLines(file)
-    bytes += Buffer.byteLength(file.patch) + Buffer.byteLength(file.filename)
+    bytes += patchBytes(file)
     if (bytes > MAX_PATCH_BYTES) throw new Error('Diff exceeds model input budget')
     anchors.set(file.filename, lines)
   }
@@ -167,6 +171,88 @@ function allowedPath(path) {
     && path.split('/').every(part => part && part !== '.' && part !== '..')
 }
 
+function reviewablePath(file) {
+  return allowedPath(file.filename) && (!file.previous_filename || allowedPath(file.previous_filename))
+}
+
+function splitPatch(file) {
+  if (patchBytes(file) <= MAX_PATCH_BYTES) return [file]
+
+  const parts = []
+  let left = 0
+  let right = 0
+  let lines = []
+  let additions = 0
+  let deletions = 0
+  let context = 0
+  // Leave space for a synthesized hunk header and keep every line intact.
+  const budget = MAX_PATCH_BYTES - Buffer.byteLength(file.filename) - 64
+  let bytes = 0
+  function flush() {
+    if (additions || deletions) {
+      const header = '@@ -' + left + ',' + (deletions + context)
+        + ' +' + right + ',' + (additions + context) + ' @@'
+      parts.push({ ...file, patch: [header, ...lines].join('\n'), additions, deletions })
+    }
+    left += deletions + context
+    right += additions + context
+    lines = []
+    additions = deletions = context = bytes = 0
+  }
+
+  for (const line of file.patch.split('\n')) {
+    const hunk = HUNK.exec(line)
+    if (hunk) {
+      flush()
+      left = Number(hunk[1])
+      right = Number(hunk[2])
+      continue
+    }
+    if (!['+', '-', ' '].includes(line[0])) continue
+    const size = Buffer.byteLength(line) + 1
+    if (size > budget) return []
+    if (bytes + size > budget) flush()
+    lines.push(line)
+    bytes += size
+    if (line.startsWith('+')) additions++
+    else if (line.startsWith('-')) deletions++
+    else context++
+  }
+  flush()
+  return parts
+}
+
+function planBatches(files) {
+  const batches = []
+  const pending = new Map()
+  let batch
+  let bytes = 0
+  for (const file of files) {
+    if (!reviewablePath(file)) continue
+    let parts
+    try {
+      changedLines(file)
+      parts = splitPatch(file)
+    } catch {
+      continue
+    }
+    if (!parts.length) continue
+    pending.set(file.filename, parts.length)
+    for (const part of parts) {
+      const size = patchBytes(part)
+      if (!batch || bytes + size > MAX_PATCH_BYTES || batch.some(f => f.filename === part.filename)) {
+        if (batches.length >= MAX_BATCHES) return { batches, pending }
+        batch = []
+        batches.push(batch)
+        bytes = 0
+      }
+      batch.push(part)
+      bytes += size
+    }
+  }
+  return { batches, pending }
+}
+
 async function reviewState(io, pr, route, secret) {
   const [users, reviews] = await Promise.all([io.requested(route.number), io.reviews(route.number)])
   const latest = reviews.filter(r => r.user?.id === route.reviewer && r.state !== 'PENDING').at(-1)
@@ -243,6 +329,53 @@ async function verifyBlockers(io, route, pr, files, result, previous, latest) {
   result.verdict = 'PASS'
 }
 
+async function analyzeBatch(io, route, pr, files) {
+  try {
+    return classify(pr, files, await io.analyze(files))
+  } catch {
+    if (!io.active(route)) return null
+    return classify(pr, files, await io.analyze(files, true))
+  }
+}
+
+async function reviewBatches(io, route, pr, files, hold) {
+  const { batches, pending } = planBatches(files)
+  const findings = []
+  let completed = 0
+  for (const batch of batches) {
+    if (!io.active(route)) return null
+    const scope = { ...pr, changed_files: batch.length }
+    try {
+      const result = await analyzeBatch(io, route, scope, batch)
+      if (!result || !io.active(route)) return null
+      await verifyBlockers(io, route, scope, batch, result)
+      findings.push(...result.findings)
+      if (!result.partial && !result.reason) {
+        completed++
+        for (const file of batch) pending.set(file.filename, pending.get(file.filename) - 1)
+      }
+    } catch {
+      // Keep verified findings from the other batches if a batch fails.
+    }
+  }
+  const unreviewed = files.filter(f => pending.get(f.filename) !== 0)
+  const priority = findings.filter(f => f.severity === 'P1')
+  const result = hold(
+    'AI 검토 완료 ' + (files.length - unreviewed.length) + '/' + files.length + '개 파일'
+    + (batches.length ? ' · ' + completed + '/' + batches.length + '개 묶음 완료' : '')
+    + '\n\n'
+    + (unreviewed.length ? '미완료·제외 파일 ' + unreviewed.length + '개'
+      + ' (' + unreviewed.slice(0, 6).map(f => clean(f.filename)).join(', ')
+      + (unreviewed.length > 6 ? ', …' : '') + ')\n\n' : '')
+    + (findings.length ? 'P1 ' + priority.length + '건 · P2 ' + (findings.length - priority.length) + '건'
+      + (findings.length > 12 ? ' · 최대 12건 표시' : '') + '\n\n' : '')
+    + '여러 묶음 또는 자동 승인 범위 밖 변경은 팀원 검토가 필요합니다.',
+  )
+  result.findings = [...priority, ...findings.filter(f => f.severity === 'P2')].slice(0, 12)
+  result.blockers = [...(result.blockers ?? []), ...priority.map(f => [f.path, f.side, f.evidence])]
+  return result
+}
+
 export async function reviewRoute(io, route, opts) {
   if (!io.active(route)) return 'inactive'
   const pr = await io.pr(route.number)
@@ -259,20 +392,19 @@ export async function reviewRoute(io, route, opts) {
     result = hold(`변경 파일이 ${pr.changed_files}개로 검토 상한 ${MAX_FILES}개를 넘었습니다. 팀원 검토가 필요합니다.`)
   } else {
     const files = await io.files(route.number, pr)
-    if (files.some(file => !allowedPath(file.filename) || (file.previous_filename && !allowedPath(file.previous_filename)))) {
-      result = hold('자동 승인 범위를 벗어난 파일입니다. 팀원 검토가 필요합니다.')
+    if (files.length !== pr.changed_files || new Set(files.map(file => file.filename)).size !== files.length) {
+      result = hold('변경 파일 목록을 전부 확인할 수 없습니다. 팀원 검토가 필요합니다.')
+    } else if (files.some(file => !reviewablePath(file) || typeof file.patch !== 'string')
+      || files.reduce((bytes, file) => bytes + patchBytes(file), 0) > MAX_PATCH_BYTES) {
+      result = await reviewBatches(io, route, pr, files, hold)
+      if (!result) return 'superseded'
     } else {
       try {
         inspect(pr, files)
         result = checkPilot(files, openBlockers(previous, files, pr.base.sha), previous?.overflow)
         if (!result) {
-          try {
-            result = classify(pr, files, await io.analyze(files))
-          } catch {
-            if (!io.active(route)) return 'superseded'
-            result = classify(pr, files, await io.analyze(files, true))
-          }
-          if (!io.active(route)) return 'superseded'
+          result = await analyzeBatch(io, route, pr, files)
+          if (!result || !io.active(route)) return 'superseded'
           await verifyBlockers(io, route, pr, files, result, previous, latest)
         }
       } catch {

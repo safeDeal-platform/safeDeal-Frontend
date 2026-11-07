@@ -302,3 +302,45 @@ test('changes to the review automation are held for manual review', async () => 
   assert.equal(posted[0].event, 'COMMENT')
   assert.match(posted[0].body, /BLOCK/)
 })
+
+test('a large source file is split at changed lines and mixed changes are reviewed without approval', async () => {
+  const longLine = 'x'.repeat(13_000)
+  const large = { ...file, additions: 3, deletions: 1,
+    patch: '@@ -10,1 +10,3 @@\n-' + longLine + '\n+' + longLine + '\n+safe()\n+unsafe()' }
+  const config = { ...file, filename: 'package.json' }
+  const calls = []
+  const { io, posted } = harness({
+    pr: async () => ({ ...pr, changed_files: 2 }),
+    files: async () => [large, config],
+    analyze: async batch => {
+      calls.push(batch)
+      return batch[0].patch.includes('unsafe()')
+        ? model({ ...p1, side: 'RIGHT', line: 12, evidence: 'unsafe()' })
+        : model()
+    },
+  })
+  await reviewRoute(io, route, opts)
+  assert.equal(calls.length, 2)
+  assert.ok(calls.every(batch => batch.length === 1 && batch[0].filename === large.filename))
+  assert.equal(posted[0].event, 'COMMENT')
+  assert.deepEqual(posted[0].comments.map(comment => [comment.path, comment.side, comment.line]), [[large.filename, 'RIGHT', 12]])
+  assert.match(posted[0].body, /1\/2개 파일 · 2\/2개 묶음 완료/)
+  assert.match(posted[0].body, /미완료·제외 파일 1개 \(package\.json\)/)
+})
+
+test('a failed batch is reported as incomplete and does not discard findings from another batch', async () => {
+  const large = { ...file, additions: 2, deletions: 0,
+    patch: '@@ -0,0 +1,2 @@\n+' + 'x'.repeat(13_000) + '\n+' + 'y'.repeat(13_000) }
+  const { io, posted } = harness({
+    files: async () => [large],
+    analyze: async ([part]) => {
+      if (part.patch.includes('yyyyy')) throw new Error('model unavailable')
+      return model({ ...p1, severity: 'P2', side: 'RIGHT', line: 1, evidence: 'xxxxx' })
+    },
+  })
+  await reviewRoute(io, route, opts)
+  assert.equal(posted[0].event, 'COMMENT')
+  assert.equal(posted[0].comments.length, 1)
+  assert.match(posted[0].body, /0\/1개 파일 · 1\/2개 묶음 완료/)
+  assert.match(posted[0].body, /미완료·제외 파일 1개/)
+})
