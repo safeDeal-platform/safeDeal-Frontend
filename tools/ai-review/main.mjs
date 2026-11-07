@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { analyzeLocal, enrollDevice, githubApp, localizeFindings, refreshGrant } from './clients.mjs'
+import { analyzeLocal, enrollDevice, githubApp, localizeFindings, refreshGrant, verifyP1 } from './clients.mjs'
 import { reviewRoute } from './review.mjs'
 import { openState } from './state.mjs'
 import { webhookServer } from './webhook.mjs'
@@ -74,6 +74,7 @@ async function serve(config, gh, state) {
     ...gh,
     active: state.active,
     analyze: (files, retry) => analyzeLocal(model, files, retry),
+    verifyP1: (files, candidates) => verifyP1(model, files, candidates),
     localize: findings => localizeFindings(model, findings),
     async grant(reviewer) {
       let current = state.getGrant(reviewer)
@@ -93,6 +94,7 @@ async function serve(config, gh, state) {
     server.listen(port, '127.0.0.1', ok)
   })
   console.log('Listening for signed GitHub webhooks on 127.0.0.1:' + port)
+  console.log('Automatic approval: ' + (opts.autoApprove ? 'enabled' : 'disabled'))
   let stopping = false
   const stop = () => { stopping = true; server.close() }
   process.once('SIGINT', stop)

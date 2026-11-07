@@ -54,6 +54,10 @@ function harness(overrides = {}) {
     reviews: async () => [],
     files: async () => [file],
     analyze: async () => model(p1),
+    verifyP1: async (_files, candidates) => candidates.map(({ id, code }) => ({
+      id, verdict: 'confirmed', evidence: code.trim(), reason: 'The code triggers the reported defect.',
+    })),
+    reviewComments: async () => [],
     localize: async findings => findings,
     grant: async () => 'fake-token',
     active: () => active,
@@ -62,6 +66,51 @@ function harness(overrides = {}) {
   }
   return { io, posted, cancel: () => { active = false } }
 }
+
+test('a refuted legacy P1 on the same head can be approved after an explicit rerequest', async () => {
+  const code = 'history.filter(({ ownerId }) => accountId === ownerId)'
+  const fixed = {
+    filename: 'src/review-pilot.ts', additions: 1, deletions: 0, patch: '@@ -8,0 +9,1 @@\n+  ' + code,
+  }
+  const finding = { ...p1, path: fixed.filename, line: 9, side: 'RIGHT', evidence: code,
+    title: 'All orders exposed', detail: 'Every order is returned.' }
+  const legacy = makeReview(pr, route, { verdict: 'BLOCK', findings: [finding] }, opts)
+  const { io, posted } = harness({
+    files: async () => [fixed],
+    analyze: async () => model(finding),
+    reviews: async () => [{ ...legacy, id: 11, user: { id: route.reviewer }, state: 'CHANGES_REQUESTED' }],
+    reviewComments: async () => legacy.comments,
+    verifyP1: async (_files, candidates) => {
+      assert.equal(candidates.length, 2)
+      assert.match(candidates[1].detail, /Every order is returned/)
+      return candidates.map(({ id }) => ({
+        id, verdict: 'refuted', evidence: code,
+        reason: 'A different account produces false and the filter excludes that order.',
+      }))
+    },
+  })
+  await reviewRoute(io, route, opts)
+  assert.equal(posted[0].event, 'APPROVE')
+  assert.equal(posted[0].commit_id, head)
+  assert.deepEqual(posted[0].comments, [])
+})
+
+test('uncertain, ungrounded or incomplete P1 checks never produce an approval', async () => {
+  const checks = [
+    { verdict: 'uncertain', evidence: 'new()', reason: 'The behavior is unclear.' },
+    { verdict: 'refuted', evidence: 'invented()', reason: 'This line is not in the patch.' },
+    { verdict: 'refuted', evidence: 'new()', reason: 'This finding was refuted.' },
+  ]
+  for (const [i, check] of checks.entries()) {
+    const { io, posted } = harness({
+      analyze: async () => ({ complete: i < 2, findings: [p1] }),
+      verifyP1: async () => [{ id: 0, ...check }],
+    })
+    await reviewRoute(io, route, opts)
+    assert.equal(posted[0].event, 'COMMENT')
+    assert.match(posted[0].body, /팀원 검토/)
+  }
+})
 
 test('an incomplete review is retried once and exact evidence anchors the corrected P1', async () => {
   const evidence = 'return orders.filter((order) => order.ownerId !== viewerId)'

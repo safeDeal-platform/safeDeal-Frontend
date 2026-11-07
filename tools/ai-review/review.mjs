@@ -135,6 +135,7 @@ export function makeReview(pr, route, result, opts) {
   ].map(blocker => [JSON.stringify(blocker), blocker]))
   const metadata = Buffer.from(JSON.stringify({
     base: pr.base.sha, retry: !!reason, overflow: !!result.overflow || unique.size > 24,
+    p1Verified: result.p1Verified === true,
     blockers: [...unique.values()].slice(0, 24),
   })).toString('base64url')
   return {
@@ -168,7 +169,9 @@ async function reviewState(io, pr, route, secret) {
   const latest = reviews.filter(r => r.user?.id === route.reviewer && r.state !== 'PENDING').at(-1)
   const previous = priorResult(latest, route, secret)
   const requested = users.some(user => user.id === route.reviewer)
-  if (previous?.base === pr.base.sha && latest.commit_id === pr.head.sha && !(previous.retry && requested)) return null
+  const legacyBlock = latest?.state === 'CHANGES_REQUESTED' && !previous?.p1Verified
+  if (previous?.base === pr.base.sha && latest.commit_id === pr.head.sha
+    && !(requested && (previous.retry || legacyBlock))) return null
   return requested || (previous && ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED'].includes(latest.state))
     ? { previous, latest } : null
 }
@@ -183,6 +186,59 @@ function openBlockers(previous, files, base) {
       && line.slice(1).includes(evidence))))
 }
 
+async function verifyBlockers(io, route, pr, files, result, previous, latest) {
+  const remaining = openBlockers(previous, files, pr.base.sha)
+  const candidates = result.findings.filter(f => f.severity === 'P1').map(finding => ({ finding }))
+  if (remaining.length && previous.base === pr.base.sha && latest?.commit_id === pr.head.sha
+    && Number.isSafeInteger(latest.id)) {
+    const comments = await io.reviewComments(route.number, latest.id)
+    const anchors = inspect(pr, files)
+    for (const blocker of remaining) {
+      const [path, side, evidence] = blocker
+      const matches = comments.filter(comment => comment.path === path && comment.side === side
+        && comment.body?.startsWith('**[P1]')
+        && anchors.get(path)?.get(side + ':' + comment.line)?.includes(evidence))
+      if (matches.length === 1) {
+        const comment = matches[0]
+        candidates.push({ blocker, finding: { path, side, line: comment.line, evidence, detail: comment.body.slice(0, 750) } })
+      }
+    }
+  }
+  const refuted = new Set()
+  const confirmed = new Set()
+  if (candidates.length) {
+    const anchors = inspect(pr, files)
+    const input = candidates.map(({ finding }, id) => ({
+      ...finding, id, code: anchors.get(finding.path).get(finding.side + ':' + finding.line),
+    }))
+    const checks = await io.verifyP1(files, input)
+    if (Array.isArray(checks) && checks.length === candidates.length
+      && new Set(checks.map(check => check?.id)).size === candidates.length) {
+      for (const check of checks) {
+        const candidate = input[check?.id]
+        if (!Number.isSafeInteger(check?.id) || !candidate || !validText(check.reason, 600)
+          || !validText(check.evidence, 250) || check.evidence.trim().length < 5
+          || !candidate.code.includes(check.evidence)) continue
+        if (check.verdict === 'confirmed') confirmed.add(candidates[check.id].finding)
+        if (check.verdict === 'refuted') refuted.add(candidates[check.id])
+      }
+    }
+  }
+  const cleared = new Set([...refuted].map(candidate => candidate.blocker))
+  result.blockers = remaining.filter(blocker => !cleared.has(blocker))
+  result.overflow = previous?.overflow
+  result.findings = result.findings.filter(f => f.severity === 'P2' || confirmed.has(f))
+  result.p1Verified = result.findings.some(f => f.severity === 'P1')
+  if (result.p1Verified) return
+  const uncertain = candidates.some(candidate => !candidate.blocker && !refuted.has(candidate))
+  if (uncertain || result.partial || result.blockers.length || result.overflow) {
+    result.verdict = 'BLOCK'
+    result.reason = 'P1의 근거 또는 전체 검토를 확인할 수 없어 팀원 검토가 필요합니다.'
+    return
+  }
+  result.verdict = 'PASS'
+}
+
 export async function reviewRoute(io, route, opts) {
   if (!io.active(route)) return 'inactive'
   const pr = await io.pr(route.number)
@@ -190,7 +246,7 @@ export async function reviewRoute(io, route, opts) {
   const start = await reviewState(io, pr, route, opts.secret)
   if (!start) return 'ineligible'
   if (!await io.grant(route.reviewer)) return 'not-enrolled'
-  const { previous } = start
+  const { previous, latest } = start
   const hold = reason => ({
     verdict: 'BLOCK', findings: [], reason, blockers: previous?.blockers, overflow: previous?.overflow,
   })
@@ -210,12 +266,8 @@ export async function reviewRoute(io, route, opts) {
           if (!io.active(route)) return 'superseded'
           result = classify(pr, files, await io.analyze(files, true))
         }
-        result.blockers = openBlockers(previous, files, pr.base.sha)
-        result.overflow = previous?.overflow
-        if (result.verdict === 'PASS' && (result.blockers.length || result.overflow)) {
-          result.verdict = 'BLOCK'
-          result.reason = '이전 P1이 해소됐는지 확인할 수 없습니다. 팀원 검토가 필요합니다.'
-        }
+        if (!io.active(route)) return 'superseded'
+        await verifyBlockers(io, route, pr, files, result, previous, latest)
       } catch {
         result = hold('변경분 또는 모델 응답을 검증할 수 없습니다. 팀원 검토가 필요합니다.')
       }
