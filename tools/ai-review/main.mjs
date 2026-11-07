@@ -73,7 +73,7 @@ async function serve(config, gh, state) {
   const io = {
     ...gh,
     active: state.active,
-    analyze: files => analyzeLocal(model, files),
+    analyze: (files, retry) => analyzeLocal(model, files, retry),
     async grant(reviewer) {
       let current = state.getGrant(reviewer)
       if (!current) return null

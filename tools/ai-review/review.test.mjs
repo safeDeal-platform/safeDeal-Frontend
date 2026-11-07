@@ -36,7 +36,9 @@ test('P1 blocks and P2 is advisory, with precise inline comments', () => {
 
 test('invalid model data, fabricated lines and incomplete diffs cannot pass', () => {
   assert.throws(() => classify(pr, [file], { complete: false, findings: [] }))
-  assert.throws(() => classify(pr, [file], model({ ...p1, line: 5 })))
+  assert.throws(() => classify(pr, [file], model({ ...p1, line: 5, evidence: 'new(' })))
+  assert.throws(() => classify(pr, [{ ...file, additions: 2, patch: file.patch + '\n+new()' }],
+    model({ ...p1, line: 8 })))
   assert.throws(() => classify(pr, [{ ...file, additions: 2 }], model()))
   assert.throws(() => classify(pr, [{ ...file, patch: undefined }], model()))
 })
@@ -57,6 +59,27 @@ function harness(overrides = {}) {
   }
   return { io, posted, cancel: () => { active = false } }
 }
+
+test('an incomplete review is retried once and exact evidence anchors the corrected P1', async () => {
+  const evidence = 'return orders.filter((order) => order.ownerId !== viewerId)'
+  const changed = {
+    filename: 'src/review-pilot.ts', additions: 1, deletions: 0,
+    patch: '@@ -8,0 +9,1 @@\n+  ' + evidence,
+  }
+  const finding = { ...p1, path: changed.filename, line: 8, evidence }
+  const attempts = []
+  const { io, posted } = harness({
+    files: async () => [changed],
+    analyze: async (_files, retry = false) => {
+      attempts.push(retry)
+      return retry ? model(finding) : { complete: false, findings: [{ ...finding, severity: 'P2' }] }
+    },
+  })
+  await reviewRoute(io, route, opts)
+  assert.deepEqual(attempts, [false, true])
+  assert.equal(posted[0].event, 'REQUEST_CHANGES')
+  assert.equal(posted[0].comments[0].line, 9)
+})
 
 test('assignment blocks on P1; a new commit can be approved after the request disappears', async () => {
   const { io, posted } = harness()

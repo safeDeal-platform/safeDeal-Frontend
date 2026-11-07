@@ -13,25 +13,41 @@ export function verifyWebhook(secret, body, signature) {
     && timingSafeEqual(Buffer.from(signature), Buffer.from(signWebhook(secret, body)))
 }
 
-function changedLines(file) {
-  if (typeof file.patch !== 'string') throw new Error('Missing patch')
-  const lines = new Map()
-  let left, right, added = 0, deleted = 0
-  for (const text of file.patch.split('\n')) {
+function* patchLines(patch) {
+  if (typeof patch !== 'string') throw new Error('Missing patch')
+  let left = 0, right = 0
+  for (const text of patch.split('\n')) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text)
     if (hunk) {
       left = Number(hunk[1])
       right = Number(hunk[2])
     } else if (text.startsWith('+') && right > 0) {
-      lines.set('RIGHT:' + right++, text.slice(1))
-      added++
+      yield { text, side: 'RIGHT', line: right++ }
+      continue
     } else if (text.startsWith('-') && left > 0) {
-      lines.set('LEFT:' + left++, text.slice(1))
-      deleted++
+      yield { text, side: 'LEFT', line: left++ }
+      continue
     } else if (text.startsWith(' ')) {
       left++
       right++
     }
+    yield { text }
+  }
+}
+
+export function numberedPatch(patch) {
+  return Array.from(patchLines(patch), ({ text, side, line }) =>
+    side ? side + ' ' + line + ': ' + text : text).join('\n')
+}
+
+function changedLines(file) {
+  const lines = new Map()
+  let added = 0, deleted = 0
+  for (const { text, side, line } of patchLines(file.patch)) {
+    if (!side) continue
+    lines.set(side + ':' + line, text.slice(1))
+    if (side === 'RIGHT') added++
+    else deleted++
   }
   if (added !== file.additions || deleted !== file.deletions || !lines.size) {
     throw new Error('Incomplete patch')
@@ -57,6 +73,14 @@ function inspect(pr, files) {
 
 const validText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max
 
+function evidenceLine(lines, side, line, evidence) {
+  if (lines?.get(side + ':' + line)?.includes(evidence)) return line
+  // Only relocate a verbatim full line that occurs once on the same side.
+  const matches = [...(lines ?? [])].filter(([key, text]) =>
+    key.startsWith(side + ':') && text.trim() === evidence.trim())
+  return matches.length === 1 ? Number(matches[0][0].split(':')[1]) : null
+}
+
 export function classify(pr, files, result) {
   const anchors = inspect(pr, files)
   if (result?.complete !== true || !Array.isArray(result.findings) || result.findings.length > 12) {
@@ -64,13 +88,14 @@ export function classify(pr, files, result) {
   }
   const findings = result.findings.map(f => {
     const side = f?.side ?? 'RIGHT'
-    const line = anchors.get(f?.path)?.get(side + ':' + f?.line)
-    if (!['P1', 'P2'].includes(f?.severity) || !Number.isSafeInteger(f.line) || !line
-      || !validText(f.evidence, 250) || !line.includes(f.evidence)
+    if (!['P1', 'P2'].includes(f?.severity) || !['LEFT', 'RIGHT'].includes(side)
+      || !Number.isSafeInteger(f.line) || f.line < 1 || !validText(f.evidence, 250)
       || !validText(f.title, 120) || !validText(f.detail, 600)) {
       throw new Error('Finding has no valid changed-line evidence')
     }
-    return { ...f, side }
+    const line = evidenceLine(anchors.get(f.path), side, f.line, f.evidence)
+    if (line === null) throw new Error('Finding has no valid changed-line evidence')
+    return { ...f, side, line }
   })
   if (new Set(findings.map(f => JSON.stringify([f.path, f.side, f.line]))).size !== findings.length) {
     throw new Error('Duplicate review locations')
@@ -176,7 +201,13 @@ export async function reviewRoute(io, route, opts) {
     } else {
       try {
         inspect(pr, files)
-        result = classify(pr, files, await io.analyze(files))
+        const first = await io.analyze(files)
+        try {
+          result = classify(pr, files, first)
+        } catch {
+          if (!io.active(route)) return 'superseded'
+          result = classify(pr, files, await io.analyze(files, true))
+        }
         result.blockers = openBlockers(previous, files, pr.base.sha)
         result.overflow = previous?.overflow
         if (result.verdict === 'PASS' && (result.blockers.length || result.overflow)) {
