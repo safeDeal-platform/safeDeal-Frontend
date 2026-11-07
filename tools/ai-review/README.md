@@ -37,7 +37,9 @@
 2. 시범 PR에서 P1 → **Request changes**, 수정 푸시 → 새 커밋 **PASS**를 확인합니다. GitHub App의 **Recent deliveries**에서 웹훅 전송을 확인할 수 있습니다. 호스트가 꺼져 배달이 실패하면 GitHub 설정에서 배달을 다시 시도합니다. 모델 오류가 나면 같은 커밋에도 리뷰를 다시 요청할 수 있습니다.
 3. 자동 승인을 켜기 전에 `dev` 보호 규칙에서 **Dismiss stale pull request approvals when new commits are pushed**와 **Require approval of the most recent reviewable push**를 켭니다. 서비스는 제출 직전에 PR을 다시 읽고 리뷰를 특정 커밋 SHA에 묶지만, GitHub 리뷰 API 자체는 읽기와 제출을 원자적으로 묶지 않습니다. 보호 규칙을 확인한 후에만 `REVIEW_AUTO_APPROVE=true`로 다시 실행하고 시범 PR에서 **Approve**까지 확인합니다.
 
-자동 승인 범위는 `src/` 아래 텍스트 소스 코드와 스타일 변경, 최대 20개 파일 및 패치 24 KB입니다. 설정, 의존성, 워크플로, 바이너리나 불완전한 변경분은 수동으로 확인합니다. 모델은 변경분만 보며 테스트를 실행하지 않습니다. GitHub의 CI·머지 규칙은 따로 유지합니다.
+최대 100개 변경 파일을 확인합니다. `src/` 아래 텍스트 소스와 스타일 변경의 합계가 24 KB 이하면 한 번에 검토합니다. 변경분이 더 크면 24 KB 이내 묶음으로 나눠 최대 12개 묶음을 순서대로 검토합니다. 큰 파일은 변경 줄 번호를 유지하며 나눕니다.
+
+여러 묶음이 필요하거나 설정, 의존성, 워크플로, 바이너리 등 범위 밖 변경이 섞이면, AI가 검토한 결과와 미완료·제외 파일을 리뷰에 표시하고 팀원이 최종 검토합니다. 자동 승인은 전체 변경이 한 묶음에 들어오고 모든 파일과 결과를 확인한 경우에만 적용됩니다. 모델은 변경분만 보며 테스트를 실행하지 않습니다. GitHub의 CI·머지 규칙은 따로 유지합니다.
 
 팀원이 GitHub **Settings → Applications → Authorized GitHub Apps**에서 위임을 철회하거나, 운영자가 `node tools/ai-review/main.mjs revoke <github-user-id>`를 실행하면 이후 리뷰가 중단됩니다. 개별 PR에서 요청을 철회하거나 팀원이 직접 리뷰를 제출해도 해당 자동 흐름이 멈춥니다. 다시 사용하려면 리뷰를 새로 요청합니다.
 
