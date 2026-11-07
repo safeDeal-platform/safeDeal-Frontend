@@ -1,0 +1,35 @@
+.auth-panel {
+  width: min(100%, 440px);
+  margin-inline: auto;
+}
+
+.auth-panel header h1 {
+  margin-block: .35rem 0;
+}
+
+.auth-panel form label {
+  display: grid;
+  gap: .375rem;
+}
+
+.auth-links a:not(.button) {
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.auth-social {
+  border-top: 1px solid #dcdbea;
+  padding-top: 1rem;
+}
+
+.auth-social .muted {
+  margin: 0;
+}
+
+.auth-message {
+  margin: 0;
+  border-radius: .5rem;
+  padding: .75rem;
+  background: #e9f6ef;
+  color: #185a3e;
+}
