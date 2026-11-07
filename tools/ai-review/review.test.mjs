@@ -303,6 +303,36 @@ test('changes to the review automation are held for manual review', async () => 
   assert.match(posted[0].body, /BLOCK/)
 })
 
+test('backend Java source and tests are reviewed together and remain comment-only', async () => {
+  const files = ['src/main/java/Auth.java', 'src/test/java/AuthTest.java'].map(filename => ({ ...file, filename }))
+  const { io, posted } = harness({
+    pr: async () => ({ ...pr, changed_files: files.length }),
+    files: async () => files,
+    analyze: async batch => {
+      assert.deepEqual(batch, files)
+      return model()
+    },
+  })
+  await reviewRoute(io, { ...route, frontend: false, repoId: 1 }, { ...opts, frontend: false })
+  assert.equal(posted[0].event, 'COMMENT')
+  assert.match(posted[0].body, /AI 검토 완료 2\/2개 파일/)
+})
+
+test('documentation in another repository can be reviewed against its default branch', async () => {
+  const docs = { ...file, filename: 'contracts/README.md' }
+  const { io, posted } = harness({
+    pr: async () => ({ ...pr, base: { ...pr.base, ref: 'main', repo: { id: 1, default_branch: 'main' } } }),
+    files: async () => [docs],
+    analyze: async batch => {
+      assert.deepEqual(batch, [docs])
+      return model()
+    },
+  })
+  await reviewRoute(io, { ...route, frontend: false, repoId: 1 }, { ...opts, frontend: false })
+  assert.equal(posted[0].event, 'COMMENT')
+  assert.match(posted[0].body, /AI 검토 완료 1\/1개 파일/)
+})
+
 test('project configuration, documentation and tests are reviewed but require a team member to approve', async () => {
   const paths = [
     '.env.example', '.gitignore', 'README.md', 'docs/setup.md', 'e2e/marketplace.spec.ts',

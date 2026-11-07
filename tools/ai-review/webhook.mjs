@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { verifyWebhook } from './review.mjs'
+import { allowedTarget, ORGANIZATION, validRepository } from './scope.mjs'
 
 const MAX_BODY = 1024 * 1024
 const numericId = n => Number.isSafeInteger(n) && n > 0
@@ -8,18 +9,22 @@ export function eventFor(type, payload, config) {
   if (type === 'github_app_authorization' && payload.action === 'revoked' && numericId(payload.sender?.id)) {
     return { kind: 'revoke', reviewer: payload.sender.id }
   }
-  if (type !== 'pull_request' || payload.repository?.id !== config.repoId
-    || payload.installation?.id !== config.installationId || !numericId(payload.number)) return null
+  if (type !== 'pull_request' || payload.installation?.id !== config.installationId || !numericId(payload.number)) return null
+  const { id: repoId, name: repository, owner } = payload.repository ?? {}
+  if (!numericId(repoId) || !validRepository(repository) || String(owner?.login ?? '').toLowerCase() !== ORGANIZATION.toLowerCase()
+    || (!config.organizationScope && repoId !== config.repoId)) return null
   const pr = payload.pull_request
   const { action, number } = payload
-  if (pr?.base?.repo?.id !== config.repoId) return null
-  if (action === 'closed' || (action === 'edited' && payload.changes?.base?.ref)) return { kind: 'close', number }
-  if (pr.base.ref !== 'dev' || pr.head?.repo?.id !== config.repoId) return null
-  if (action === 'synchronize' || action === 'ready_for_review') return { kind: 'update', number }
+  const scope = { repoId, repository, number }
+  if (pr?.base?.repo?.id !== repoId) return null
+  if (action === 'closed' || (action === 'edited' && payload.changes?.base?.ref)) return { kind: 'close', ...scope }
+  if (!allowedTarget(pr.base.ref, payload.repository.default_branch, repoId === config.repoId)
+    || pr.head?.repo?.id !== repoId) return null
+  if (action === 'synchronize' || action === 'ready_for_review') return { kind: 'update', ...scope }
   const reviewer = payload.requested_reviewer
   if (reviewer?.type !== 'User' || !numericId(reviewer.id) || pr.user?.id === reviewer.id) return null
-  if (action === 'review_requested') return { kind: 'assign', number, reviewer: reviewer.id }
-  if (action === 'review_request_removed') return { kind: 'remove', number, reviewer: reviewer.id }
+  if (action === 'review_requested') return { kind: 'assign', ...scope, reviewer: reviewer.id }
+  if (action === 'review_request_removed') return { kind: 'remove', ...scope, reviewer: reviewer.id }
   return null
 }
 

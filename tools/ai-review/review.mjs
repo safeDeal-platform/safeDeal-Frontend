@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { checkPilot, PILOT_PATH } from './pilot.mjs'
+import { allowedTarget } from './scope.mjs'
 
 export const MAX_FILES = 100
 const MAX_PATCH_BYTES = 24_000
@@ -111,7 +112,9 @@ export function classify(pr, files, result) {
 }
 
 function markerMac(route, head, payload, secret) {
-  const scope = JSON.stringify(['review-v1', route.number, route.reviewer, head, payload])
+  const repositoryScope = route.frontend === false
+    ? ['review-v2', route.repoId] : ['review-v1']
+  const scope = JSON.stringify([...repositoryScope, route.number, route.reviewer, head, payload])
   return createHmac('sha256', secret).update(scope).digest('hex')
 }
 
@@ -160,16 +163,18 @@ export function makeReview(pr, route, result, opts) {
   }
 }
 
-export function eligible(pr, route, repoId) {
+export function eligible(pr, route, repoId, frontend = true) {
   return pr?.state === 'open' && pr.draft === false && pr.user?.id !== route.reviewer
     && pr.base?.repo?.id === repoId && pr.head?.repo?.id === repoId
-    && pr.base.ref === 'dev' && SHA.test(pr.base.sha) && SHA.test(pr.head.sha)
+    && allowedTarget(pr.base.ref, pr.base.repo.default_branch, frontend)
+    && SHA.test(pr.base.sha) && SHA.test(pr.head.sha)
 }
 
 const projectFiles = new Set(['.env.example', '.gitignore', 'index.html', 'package.json', 'package-lock.json'])
 const sourcePath = /^src\/.+\.(?:[cm]?[jt]sx?|css|scss)$/
+const backendPath = /^src\/.+\.(?:java|kt|kts|groovy|sql|xml)$|^(?:build|settings)\.gradle(?:\.kts)?$|^pom\.xml$/
 const testPath = /^(?:e2e|tests?)\/.+\.[cm]?[jt]sx?$|^src\/(?:.*\/)?__tests__\/.+\.[cm]?[jt]sx?$|^src\/.+\.(?:test|spec)\.[cm]?[jt]sx?$/
-const docsPath = /^(?:docs\/.+|[^/]+)\.md$/i
+const docsPath = /^(?:[^./][^/]*\/)*[^./][^/]*\.md$/i
 const configPath = /^(?:tsconfig(?:\.[\w-]+)?\.json|(?:vite|vitest|playwright|eslint|prettier|postcss|tailwind)\.config\.[cm]?[jt]s)$/
 
 function allowedPaths(file, match) {
@@ -179,8 +184,9 @@ function allowedPaths(file, match) {
 }
 
 function reviewablePath(file) {
-  return allowedPaths(file, path => sourcePath.test(path) || testPath.test(path) || docsPath.test(path)
-    || projectFiles.has(path) || configPath.test(path))
+  return allowedPaths(file, path => !path.startsWith('tools/ai-review/')
+    && (sourcePath.test(path) || backendPath.test(path) || testPath.test(path) || docsPath.test(path)
+      || projectFiles.has(path) || configPath.test(path)))
 }
 
 function autoApprovablePath(file) {
@@ -392,7 +398,7 @@ async function reviewBatches(io, route, pr, files, hold) {
 export async function reviewRoute(io, route, opts) {
   if (!io.active(route)) return 'inactive'
   const pr = await io.pr(route.number)
-  if (!eligible(pr, route, opts.repoId)) return 'ineligible'
+  if (!eligible(pr, route, opts.repoId, opts.frontend)) return 'ineligible'
   const start = await reviewState(io, pr, route, opts.secret)
   if (!start) return 'ineligible'
   if (!await io.grant(route.reviewer)) return 'not-enrolled'
@@ -414,7 +420,7 @@ export async function reviewRoute(io, route, opts) {
     } else {
       try {
         inspect(pr, files)
-        result = checkPilot(files, openBlockers(previous, files, pr.base.sha), previous?.overflow)
+        result = opts.frontend !== false && checkPilot(files, openBlockers(previous, files, pr.base.sha), previous?.overflow)
         if (!result) {
           result = await analyzeBatch(io, route, pr, files)
           if (!result || !io.active(route)) return 'superseded'
@@ -431,7 +437,7 @@ export async function reviewRoute(io, route, opts) {
   const end = await reviewState(io, pr, route, opts.secret)
   if (!end || end.latest?.id !== start.latest?.id) return 'superseded'
   const current = await io.pr(route.number)
-  if (!eligible(current, route, opts.repoId) || current.head.sha !== pr.head.sha || current.base.sha !== pr.base.sha
+  if (!eligible(current, route, opts.repoId, opts.frontend) || current.head.sha !== pr.head.sha || current.base.sha !== pr.base.sha
     || !io.active(route)) {
     return 'superseded'
   }

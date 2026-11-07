@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict'
+import { generateKeyPairSync } from 'node:crypto'
 import { test } from 'node:test'
-import { analyzeLocal, localizeFindings, tokenGrant } from './clients.mjs'
+import { analyzeLocal, githubApp, localizeFindings, tokenGrant } from './clients.mjs'
+
+test('a repository client restricts installation tokens and checks write access on the destination repository', async t => {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const repo = { id: 19, permissions: { push: true } }
+  const fetch = t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'app-token', expires_at: '2100-01-01T00:00:00Z' })
+    if (url.endsWith('/user')) return Response.json({ id: 7, type: 'User' })
+    if (url.endsWith('/safeDeal-Backend')) return Response.json(repo)
+    return Response.json({})
+  })
+  const gh = githubApp({ appId: 1, installationId: 8, privateKey, repoId: 19, repository: 'safeDeal-Backend' })
+  await gh.pr(2)
+  assert.deepEqual(JSON.parse(fetch.mock.calls[0].arguments[1].body), {
+    repository_ids: [19], permissions: { contents: 'read', pull_requests: 'read' },
+  })
+  assert.match(fetch.mock.calls[1].arguments[0], /safeDeal-Backend\/pulls\/2$/)
+  assert.equal((await gh.identity('user-token')).id, 7)
+  repo.permissions.push = false
+  await assert.rejects(gh.identity('user-token'), /write access/)
+  await gh.submit('user-token', 2, {})
+  assert.match(fetch.mock.calls.at(-1).arguments[0], /safeDeal-Backend\/pulls\/2\/reviews$/)
+})
 
 test('Ollama receives patches only through its loopback API and truncated output fails closed', async t => {
   const response = { done: true, done_reason: 'stop', message: { content: '{"coverage":"all_supplied_patches_reviewed","findings":[]}' } }
