@@ -60,3 +60,12 @@
 |---|---|
 | 재민 | 프론트용 `claude setup-token` → 레포 시크릿 `CLAUDE_CODE_OAUTH_TOKEN` 등록, 사용 크레딧 꺼짐 확인, 로컬 봇 자동 실행 끄기(C-M) |
 | 경화 | C-F 순서대로: 동의, 봇 정지·App 제거, 기본 브랜치 dev, Interaction limits, Actions 승인, Claude App에 프론트 추가, 도입 PR 리뷰·머지(main 반영), 머지 뒤 룰셋(C-G) |
+
+## 설정 완료 기록 (2026-11-15)
+
+| 항목 | 상태 |
+|---|---|
+| 기본 브랜치 | dev (C-A) |
+| 봇 PR #5~#7 | 닫음 (C-B) |
+| 룰셋 `ai-review` | dev·main, strict, 코드 소유자 승인 (C-G) |
+| 시크릿 | 프론트 전용 `CLAUDE_CODE_OAUTH_TOKEN` 등록 (C-H) |
