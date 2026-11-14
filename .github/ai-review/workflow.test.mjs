@@ -373,3 +373,17 @@ test('O2 프롬프트가 inline 댓글에 실제 파일 줄 번호를 쓰고 같
   assert.ok(prompt.includes('ai-review-pr.diff 파일의 줄 번호를 쓰지 않는다'), 'diff 파일 줄 번호 금지 문구가 있어야 한다');
   assert.ok(prompt.includes('같은 지적은 한 번만'), '중복 금지 문구가 있어야 한다');
 });
+
+// O2 보완: 기본 checkout은 merge 커밋이라 Read로 보는 줄 번호가 PR head 파일과 다를 수 있다.
+test('O2 checkout은 PR head 커밋(github.event.pull_request.head.sha)을 연다', () => {
+  const { wf } = load();
+  const checkout = steps(wf).find((s) => String(s.uses ?? '').startsWith('actions/checkout@'));
+  assert.equal(expr(checkout?.with?.ref), 'github.event.pull_request.head.sha');
+});
+
+test('O2 프롬프트가 삭제된 줄은 이전 파일 줄 번호와 LEFT로 달라고 한다', () => {
+  const { wf } = load();
+  const prompt = String(claudeStep(wf).with?.prompt ?? '');
+  assert.ok(prompt.includes('삭제된 줄'), '삭제된 줄 안내가 있어야 한다');
+  assert.ok(prompt.includes('side는 LEFT'), 'LEFT 안내가 있어야 한다');
+});
