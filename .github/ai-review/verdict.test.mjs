@@ -405,3 +405,32 @@ test('N1 ToolSearch를 쓰고 PASS 표식이면 CLI도 PASS', () => {
   assert.match(r.out, /^verdict=PASS$/m);
   assert.equal(r.status, 0);
 });
+
+// O1: 실제 CLI(2.1.314·2.1.325)로 잘못된 토큰을 넣어 얻은 result 문구(2026-11-15 실측).
+// 토큰에 줄바꿈이 섞이면 api_error_status 없이 "Invalid auth token"만 온다(프론트 #9·#10에서 unknown으로 나온 원인).
+const REAL_AUTH_ERRORS = [
+  'Failed to authenticate. API Error: 401 OAuth access token is invalid.',
+  'Failed to authenticate. API Error: 401 Invalid bearer token',
+  'Invalid auth token · Fix external auth token · Invalid Authorization header value from CLAUDE_CODE_OAUTH_TOKEN: it contains a line break at character 15 (16 characters on 2 lines).',
+];
+
+test('O1 실측한 인증 실패 문구는 모두 auth_failed', () => {
+  for (const text of REAL_AUTH_ERRORS) assert.equal(classifyFailure({ exitCode: 1, stderr: text }), 'auth_failed', text);
+});
+
+test('O1 CLI: is_error result(줄바꿈 토큰)는 reason=auth_failed', () => {
+  const r = conclude([
+    init(['Read']),
+    { type: 'result', subtype: 'success', is_error: true, num_turns: 1, total_cost_usd: 0, api_error_status: null, result: REAL_AUTH_ERRORS[2] },
+  ]);
+  assert.match(r.out, /^verdict=UNKNOWN$/m);
+  assert.match(r.out, /^reason=auth_failed$/m);
+  assert.notEqual(r.status, 0);
+});
+
+test('O1 CLI: api_error_status 401·403은 문구와 상관없이 auth_failed', () => {
+  for (const status of [401, 403]) {
+    const r = conclude([init(['Read']), { type: 'result', subtype: 'success', is_error: true, api_error_status: status, result: '알 수 없는 문구' }]);
+    assert.match(r.out, /^reason=auth_failed$/m, String(status));
+  }
+});

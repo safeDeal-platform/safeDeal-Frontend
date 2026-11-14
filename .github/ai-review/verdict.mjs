@@ -113,7 +113,8 @@ export function conclusionOf({ verdict, p1Count } = {}) {
 
 // 아래 문구는 문서·관찰에서 가져온 가정값이다. 시범에서 실제 출력으로 바꾼다(테스트 변경 승인 절차).
 const USAGE_LIMIT = /session limit|weekly limit|usage limit|spend limit|API Error: 429|rate_limit_error/i;
-const AUTH_FAILED = /OAuth token (revoked|has expired)|does not have access to Claude Code|API Error: 401|authentication_error/i;
+// O1: 실측(2026-11-15) — "Failed to authenticate. API Error: 401 …", 토큰에 줄바꿈이 있으면 "Invalid auth token · Fix external auth token …"
+const AUTH_FAILED = /OAuth token (revoked|has expired)|does not have access to Claude Code|API Error: 401|authentication_error|Failed to authenticate|Invalid auth token|Fix external auth token/i;
 const UPSTREAM = /API Error: 5\d\d|overloaded/i;
 
 export function classifyFailure({ exitCode, stderr, timedOut } = {}) {
@@ -137,6 +138,8 @@ export function conclude({ nonce, executionJson } = {}) {
   const last = lastResultMessage(messages);
   if (!last) return { ...unknown('empty_output'), findings: undefined };
   if (!isSuccessResult(last)) {
+    // O1: 구조화된 상태 코드가 401·403이면 문구와 상관없이 인증 실패.
+    if (last.api_error_status === 401 || last.api_error_status === 403) return { ...unknown('auth_failed'), findings: undefined };
     // 실패한 result(error_max_turns, is_error 등)의 내용으로 이유를 분류한다.
     return { ...unknown(classifyFailure({ exitCode: 1, stderr: JSON.stringify(last), timedOut: false })), findings: undefined };
   }
