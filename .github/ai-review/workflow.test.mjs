@@ -364,3 +364,12 @@ test('C-K 프롬프트에 프론트 리뷰 관점(XSS·토큰 저장·VITE_ 환�
     assert.ok(prompt.includes(word), `프론트 리뷰 관점 "${word}"가 있어야 한다`);
   }
 });
+
+// O2: 프론트 #10에서 diff 파일의 줄 번호로 댓글을 단 뒤 같은 지적을 다시 단 중복을 막는다.
+test('O2 프롬프트가 inline 댓글에 실제 파일 줄 번호를 쓰고 같은 지적을 두 번 달지 말라고 한다', () => {
+  const { wf } = load();
+  const prompt = String(claudeStep(wf).with?.prompt ?? '');
+  assert.ok(prompt.includes('실제 파일의 줄 번호'), '줄 번호 기준 문구가 있어야 한다');
+  assert.ok(prompt.includes('ai-review-pr.diff 파일의 줄 번호를 쓰지 않는다'), 'diff 파일 줄 번호 금지 문구가 있어야 한다');
+  assert.ok(prompt.includes('같은 지적은 한 번만'), '중복 금지 문구가 있어야 한다');
+});
