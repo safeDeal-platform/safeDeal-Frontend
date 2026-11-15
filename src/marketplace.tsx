@@ -264,6 +264,7 @@ export function BrowsePage() {
     const value = searchParams.get(field)?.trim()
     if (value) filters[field] = value
   }
+  // A filter change remounts both the form and the results; as siblings they need distinct keys.
   const filterKey = JSON.stringify(filters)
   return <>
     <CatalogHero />
@@ -278,9 +279,9 @@ export function BrowsePage() {
         </select>
       </label>
     </div>
-    <CatalogFilters key={filterKey} filters={filters} categories={categories} update={setSearchParams} categoriesLoading={loading} />
+    <CatalogFilters key={'filters:' + filterKey}filters={filters} categories={categories} update={setSearchParams} categoriesLoading={loading} />
     {error && <div className="mp-inline-alert" role="alert"><span>카테고리를 불러오지 못했습니다.</span><button className="button" onClick={retry}>다시 시도</button></div>}
-    <ListingResults key={filterKey} filters={filters} categories={categories} />
+    <ListingResults key={'results:' + filterKey}filters={filters} categories={categories} />
   </>
 }
 
