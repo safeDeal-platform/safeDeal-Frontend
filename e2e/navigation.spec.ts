@@ -96,3 +96,23 @@ test('로그인 후 같은 매물에서 찜을 추가하고 해제한다', async
   await remove.click()
   await expect(add).toHaveAttribute('aria-pressed', 'false')
 })
+
+test('인증 화면에서 로그인하면 인증 화면 대신 매물 목록으로 가고, 로그인 상태로는 로그인 화면에 머물지 않는다', async ({ page }) => {
+  await page.route('**/api/auth/login', (route) => route.fulfill({
+    json: { success: true, data: { publicId: '01JABCDEFGHJKMNPQRSTVWXYZ4', nickname: '테스트 사용자', role: 'USER', emailVerified: true, trustScore: 50, accessToken: 'test-access', expiresIn: 900 } },
+  }))
+  await page.route('**/api/notifications/unread-count', (route) => route.fulfill({ json: { success: true, data: { unreadCount: 0 } } }))
+  await page.goto('/signup')
+  await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '로그인' }).click()
+  await page.getByLabel('이메일').fill('buyer@example.test')
+  await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('heading', { name: '전체 매물' })).toBeVisible()
+
+  // 새로고침해 refresh 쿠키로 세션을 복원한 사용자가 로그인 화면을 열면 매물 목록으로 보낸다.
+  await page.route('**/api/auth/reissue', (route) => route.fulfill({ json: { success: true, data: { accessToken: 'test-access', expiresIn: 900 } } }))
+  await page.goto('/login')
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('heading', { name: '전체 매물' })).toBeVisible()
+})
