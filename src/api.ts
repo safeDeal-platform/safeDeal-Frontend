@@ -26,11 +26,21 @@ interface ListingRef {
   status: ListingStatus;
 }
 
+// Fields marked "requested" are in the API spec but not yet returned by the backend.
+// Screens render them only when the server sends them and never fill them in.
 export interface ListingSummary extends ListingRef {
   categoryCode: string;
   regionSido: string;
   regionSigungu: string;
   createdAt: string;
+  thumbnailUrl?: string | null; // requested
+  verificationBadge?: string | null; // requested
+}
+
+export interface ListingSeller {
+  publicId: string;
+  nickname: string;
+  trustScore: number;
 }
 
 export interface ListingDetail extends ListingRef {
@@ -41,6 +51,11 @@ export interface ListingDetail extends ListingRef {
   viewCount: number;
   createdAt: string;
   version: number;
+  images?: { url: string; isPrimary?: boolean }[]; // requested
+  seller?: ListingSeller; // requested
+  verificationBadge?: string | null; // requested
+  favoriteCount?: number; // requested
+  favorited?: boolean; // proposed: only for a signed-in viewer
 }
 
 export interface ListingFilters {
