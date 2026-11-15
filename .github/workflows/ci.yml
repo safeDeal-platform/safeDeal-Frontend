@@ -1,0 +1,59 @@
+name: ci
+
+# 프론트 빌드·단위 테스트·브라우저 테스트를 PR마다 돌린다(CASES.md C-C의 후속 요구사항).
+# ai-review와 같은 규칙을 따른다: 트리거는 pull_request(포크 PR에 시크릿·쓰기 권한을 주지 않음),
+# 액션은 커밋 SHA로 고정(CIR-20), checkout 토큰은 남기지 않음(CIR-21), 시크릿은 쓰지 않는다.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 같은 PR·브랜치의 이전 실행만 취소한다.
+    concurrency:
+      group: ci-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # package.json engines(>=22.12.0)와 맞춘다.
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # 백엔드 없이 화면을 띄우고 API 응답은 테스트 안에서 재현한다.
+      - name: Browser tests
+        run: npm run test:e2e
+
+      # 실패한 브라우저 테스트의 trace·스냅샷을 남겨 원인을 재현 없이 볼 수 있게 한다.
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (2026-10-07)
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7
