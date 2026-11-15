@@ -4,6 +4,7 @@ import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-ro
 import { api } from './api'
 import { AuthPage, useAuth } from './auth'
 import { BrowsePage, FavoritesPage, ListingPage, SellPage } from './marketplace'
+import { AccountPage, CartPage, ChatPage, PricesPage, SupportPage } from './services'
 
 function Header() {
   const { authenticated, ready, logout } = useAuth()
@@ -115,7 +116,11 @@ export function App() {
           <Route path="/listings/:id" element={<ListingPage />} />
           <Route path="/sell" element={<SellPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
-          {/* 채팅·시세·마이페이지·장바구니·고객센터 화면은 다음 PR에서 연결한다. */}
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/prices" element={<PricesPage />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="/cart" element={<CartPage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route path="/login" element={<AuthPage kind="login" />} />
           <Route path="/signup" element={<AuthPage kind="signup" />} />
           <Route path="/email/verify" element={<AuthPage kind="verify" />} />
