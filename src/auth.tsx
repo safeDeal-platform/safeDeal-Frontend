@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError, authSession } from './api';
 import './auth.css';
 
@@ -56,8 +56,15 @@ function safeReturnTarget(from: unknown, queryTarget: string | null) {
   if (typeof target !== 'string') target = queryTarget;
   if (typeof target !== 'string' || !target.startsWith('/') || target.startsWith('//')) return '/';
   if (Array.from(target).some((character) => character === '\\' || character.charCodeAt(0) < 32)) return '/';
+  // Returning to an account screen after signing in would only show the form again.
+  if (AUTH_PATHS.has(target.split(/[?#]/)[0].replace(/\/+$/, '') || '/')) return '/';
   return target;
 }
+
+const AUTH_PATHS = new Set([
+  '/login', '/signup', '/email/verify', '/auth/email/verify',
+  '/password/reset-request', '/password/reset', '/auth/password/reset',
+]);
 
 function feedback(error: unknown) {
   if (error instanceof ApiError) return error.fieldErrors[0]?.message || error.message;
@@ -158,6 +165,12 @@ function AuthScreen({ kind }: { kind: AuthPageKind }) {
       await authSession.resend();
       setMessage('인증 메일을 다시 보냈습니다.');
     });
+  }
+
+  // A signed-in visitor has nothing to do on these forms. While a submit is pending the form
+  // navigates on its own (signup continues to email verification), so the redirect waits.
+  if (authenticated && !pending && (kind === 'login' || kind === 'signup')) {
+    return <Navigate to={returnTarget} replace />;
   }
 
   const passwordFields = kind === 'signup' || kind === 'reset';
