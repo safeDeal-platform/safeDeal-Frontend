@@ -284,7 +284,12 @@ export const authSession = {
     signIn('/api/auth/signup', { email, password, nickname }),
   logout() {
     return serializeAuth(async () => {
-      await send<void>('/api/auth/logout', json('POST'), accessToken);
+      try {
+        await send<void>('/api/auth/logout', json('POST'), accessToken);
+      } catch (error) {
+        // The server already treats this session as ended; only a network or server failure keeps it.
+        if (!(error instanceof ApiError) || (error.status !== 401 && error.status !== 403)) throw error;
+      }
       sessionVersion++;
       restoreUnresolved = false;
       publishSession(null, null);
