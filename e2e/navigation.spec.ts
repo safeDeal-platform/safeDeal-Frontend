@@ -104,6 +104,9 @@ test('인증 화면에서 로그인하면 인증 화면 대신 매물 목록으�
   await page.route('**/api/notifications/unread-count', (route) => route.fulfill({ json: { success: true, data: { unreadCount: 0 } } }))
   await page.goto('/signup')
   await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '로그인' }).click()
+  // 회원가입 폼에도 같은 이름의 입력칸이 있으므로, 로그인 화면으로 바뀐 뒤에 입력한다.
+  await expect(page).toHaveURL(/\/login$/)
+  await expect(page.getByRole('heading', { name: '로그인', level: 1 })).toBeVisible()
   await page.getByLabel('이메일').fill('buyer@example.test')
   await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
   await page.getByRole('button', { name: '로그인', exact: true }).click()
