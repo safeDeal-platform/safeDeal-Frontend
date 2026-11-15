@@ -13,9 +13,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const state = useSyncExternalStore(authSession.subscribe, authSession.getSnapshot, authSession.getSnapshot);
 
   useEffect(() => {
-    void authSession.restore().catch(() => {
-      // Public screens stay available when the server cannot restore a session.
-    });
+    const restore = () => {
+      void authSession.restore().catch(() => {
+        // Public screens stay available when the server cannot restore a session.
+      });
+    };
+    restore();
+    // Retry a restore that failed on the network once the tab regains focus or connectivity.
+    window.addEventListener('online', restore);
+    window.addEventListener('focus', restore);
+    return () => {
+      window.removeEventListener('online', restore);
+      window.removeEventListener('focus', restore);
+    };
   }, []);
 
   return <AuthContext.Provider value={{ ...state, logout: authSession.logout }}>{children}</AuthContext.Provider>;
@@ -161,7 +171,7 @@ function AuthScreen({ kind }: { kind: AuthPageKind }) {
       </header>
       {error && <p className="error" role="alert">{error}</p>}
       {message && <p className="auth-message" role="status">{message}</p>}
-      {kind === 'verify' && account?.emailVerified === null && (
+      {kind === 'verify' && authenticated && (account === null || account.emailVerified === null) && (
         <p className="muted">현재 로그인한 계정의 인증 상태를 확인하려면 다시 로그인해 주세요.</p>
       )}
       {showsForm && (
@@ -201,7 +211,7 @@ function AuthScreen({ kind }: { kind: AuthPageKind }) {
             <button className="button primary" type="button" disabled={pending} onClick={() => void verify()}>
               {pending ? '인증 중…' : '이메일 인증 완료'}
             </button>
-          ) : authenticated && account?.emailVerified !== null && account?.emailVerified !== true && (
+          ) : authenticated && account?.emailVerified === false && (
             <button className="button" type="button" disabled={pending} onClick={() => void resend()}>
               {pending ? '발송 중…' : '인증 메일 다시 받기'}
             </button>

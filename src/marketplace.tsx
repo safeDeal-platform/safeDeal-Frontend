@@ -73,11 +73,10 @@ function useCursorPage<T>(load: PageLoader<T>) {
     setError('')
     loader(nextCursor, controller.signal).then((page) => {
       if (controller.signal.aborted) return
-      const next = page.hasNext ? page.nextCursor : null
-      if (next && (next === nextCursor || seen.current.has(next))) {
-        throw new Error('다음 목록을 읽을 수 없습니다.')
-      }
+      let next = page.hasNext ? page.nextCursor : null
       if (nextCursor) seen.current.add(nextCursor)
+      // A cursor the list already visited would only repeat pages, so the list ends here.
+      if (next && seen.current.has(next)) next = null
       setItems((previous) => nextCursor ? [...previous, ...page.items] : page.items)
       setCursor(next ?? undefined)
       setDone(!next)
@@ -268,17 +267,41 @@ export function BrowsePage() {
 
 type FavoriteState = { value: boolean | null; error: string }
 
-async function findFavorite(id: string, signal: AbortSignal) {
-  let cursor: string | undefined
+async function collectFavoriteIds() {
+  const ids = new Set<string>()
   const visited = new Set<string>()
+  let cursor: string | undefined
   do {
-    const page = await api.favorites(cursor, signal)
-    if (page.items.some((item) => item.listing.publicId === id)) return true
+    const page = await api.favorites(cursor)
+    page.items.forEach((item) => ids.add(item.listing.publicId))
     cursor = page.hasNext ? page.nextCursor ?? undefined : undefined
-    if (cursor && visited.has(cursor)) throw new Error('찜 목록의 다음 페이지를 읽을 수 없습니다.')
+    if (cursor && visited.has(cursor)) break
     if (cursor) visited.add(cursor)
   } while (cursor)
-  return false
+  return ids
+}
+
+// The listing detail has no favorited flag yet, so the favorite list is read once per session
+// and kept in sync with this tab's own toggles instead of being scanned on every detail view.
+let favoriteCache: { session: number; ids: Promise<Set<string>> } | undefined
+
+function favoriteIds(session: number) {
+  if (favoriteCache?.session === session) return favoriteCache.ids
+  const ids: Promise<Set<string>> = collectFavoriteIds().catch((cause: unknown) => {
+    if (favoriteCache?.ids === ids) favoriteCache = undefined
+    throw cause
+  })
+  favoriteCache = { session, ids }
+  return ids
+}
+
+function rememberFavorite(session: number, id: string, favorited: boolean) {
+  if (favoriteCache?.session !== session) return
+  favoriteCache.ids.then((ids) => { if (favorited) ids.add(id); else ids.delete(id) }, () => undefined)
+}
+
+async function findFavorite(session: number, id: string) {
+  return (await favoriteIds(session)).has(id)
 }
 
 function ListingDetailContent({ listing }: { listing: ListingDetail }) {
@@ -300,13 +323,13 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
   useEffect(() => {
     if (!auth.authenticated) return
     const controller = new AbortController()
-    findFavorite(listing.publicId, controller.signal).then((value) => {
+    findFavorite(auth.sessionKey, listing.publicId).then((value) => {
       if (!controller.signal.aborted) setFavorite({ value, error: '' })
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setFavorite({ value: null, error: errorMessage(cause) })
     })
     return () => controller.abort()
-  }, [auth.authenticated, listing.publicId, favoriteRetry])
+  }, [auth.authenticated, auth.sessionKey, listing.publicId, favoriteRetry])
 
   const from = location.pathname + location.search
   const signIn = () => navigate('/login', { state: { from } })
@@ -321,6 +344,7 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
     setFavorite((current) => ({ ...current, error: '' }))
     try {
       const result = await api.favorite(listing.publicId, !favorite.value)
+      rememberFavorite(auth.sessionKey, listing.publicId, result.favorited)
       setFavorite({ value: result.favorited, error: '' })
     } catch (cause) {
       setFavorite((current) => ({ ...current, error: errorMessage(cause) }))
@@ -418,7 +442,7 @@ export function ListingPage() {
   return id ? <ListingRequest key={id} id={id} /> : <p className="mp-state">매물을 찾을 수 없습니다.</p>
 }
 
-function FavoriteResults() {
+function FavoriteResults({ session }: { session: number }) {
   const page = useCursorPage<FavoriteSummary>((cursor, signal) => api.favorites(cursor, signal))
   const [removing, setRemoving] = useState<string[]>([])
   const [removeError, setRemoveError] = useState('')
@@ -429,6 +453,7 @@ function FavoriteResults() {
     setRemoveError('')
     try {
       const result = await api.favorite(id, false)
+      rememberFavorite(session, id, result.favorited)
       if (!result.favorited) {
         removed.current.add(id)
         page.setItems((items) => items.filter((item) => item.listing.publicId !== id))
@@ -463,7 +488,7 @@ export function FavoritesPage() {
   return <section>
     <div className="mp-page-heading"><p className="eyebrow">FAVORITES</p><h1>찜한 매물</h1><p>다시 보고 싶은 매물을 모아볼 수 있어요.</p></div>
     {!auth.ready ? <p className="mp-state" role="status">로그인 상태를 확인하는 중입니다.</p> : auth.authenticated
-      ? <FavoriteResults key={auth.sessionKey} />
+      ? <FavoriteResults key={auth.sessionKey} session={auth.sessionKey} />
       : <div className="mp-state"><p>로그인하면 찜한 매물을 볼 수 있어요.</p><Link className="button primary" to="/login" state={{ from: '/favorites' }}>로그인</Link></div>}
   </section>
 }

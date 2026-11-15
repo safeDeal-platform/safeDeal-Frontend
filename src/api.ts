@@ -134,6 +134,9 @@ let accessToken: string | null = null;
 let sessionVersion = 0;
 let pendingReissue: Promise<string | null> | null = null;
 let sessionWork: Promise<unknown> = Promise.resolve();
+// True while the last restore attempt ended on a network or server failure rather than an auth answer.
+let restoreUnresolved = false;
+const RESTORE_RETRY_DELAYS_MS = [500, 1500];
 const authListeners = new Set<() => void>();
 
 function publishSession(token: string | null, account: AuthState['account']) {
@@ -236,6 +239,7 @@ function signIn(path: '/api/auth/login' | '/api/auth/signup', credentials: objec
   return serializeAuth(async () => {
     const account = await send<AuthResponse>(path, json('POST', credentials), null);
     sessionVersion++;
+    restoreUnresolved = false;
     publishSession(account.accessToken, account);
   });
 }
@@ -246,10 +250,31 @@ export const authSession = {
     authListeners.add(listener);
     return () => { authListeners.delete(listener); };
   },
+  /**
+   * Restores the session from the refresh cookie. A network or server failure is retried briefly;
+   * if it still fails, the screen continues signed out and a later call (on focus or reconnect) tries again.
+   */
   async restore() {
-    if (authState.ready) return;
+    if (authState.ready && !restoreUnresolved) return;
+    const version = sessionVersion;
     try {
-      await reissue();
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await reissue();
+          restoreUnresolved = false;
+          return;
+        } catch (error) {
+          if (attempt >= RESTORE_RETRY_DELAYS_MS.length) {
+            restoreUnresolved = true;
+            throw error;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, RESTORE_RETRY_DELAYS_MS[attempt]));
+        if (version !== sessionVersion) {
+          restoreUnresolved = false;
+          return;
+        }
+      }
     } finally {
       if (!authState.ready) publishSession(null, null);
     }
@@ -261,6 +286,7 @@ export const authSession = {
     return serializeAuth(async () => {
       await send<void>('/api/auth/logout', json('POST'), accessToken);
       sessionVersion++;
+      restoreUnresolved = false;
       publishSession(null, null);
     });
   },

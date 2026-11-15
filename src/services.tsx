@@ -58,7 +58,8 @@ function ServiceError({ message, retry }: { message: string; retry: () => void }
 
 function PriceResult({ stats, category }: { stats: PriceStatistics; category: string }) {
   const { medianPrice, minPrice, maxPrice, calculatedAt } = stats
-  const enoughSamples = stats.sampleCount >= 5 && medianPrice != null && minPrice != null && maxPrice != null
+  // The server decides whether the sample is large enough and omits the prices when it is not.
+  const enoughSamples = medianPrice != null && minPrice != null && maxPrice != null
   return (
     <section className="service-price-result" aria-live="polite">
       <div className="service-row">
@@ -138,7 +139,7 @@ export function PricesPage() {
         <aside className="panel service-panel">
           <ChartNoAxesCombined className="service-illustration" aria-hidden="true" />
           <h2>시세를 보는 법</h2>
-          <p className="muted">표본이 5건 이상이면 거래 가격의 중앙값과 범위를 보여드려요. 제품 상태와 구성에 따라 거래가는 달라질 수 있어요.</p>
+          <p className="muted">거래 표본이 충분하면 거래 가격의 중앙값과 범위를 보여드려요. 제품 상태와 구성에 따라 거래가는 달라질 수 있어요.</p>
           <div className="service-notice">
             <strong>AI 시세 챗봇</strong>
             <p>상품명으로 질문하는 기능은 연동 예정이에요.</p>

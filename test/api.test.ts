@@ -86,3 +86,70 @@ test('verifying a public email token leaves the signed-in account verification s
     await authSession.logout();
   }
 });
+
+async function freshSession() {
+  vi.resetModules();
+  return (await import('../src/api')).authSession;
+}
+
+test('restoring a session retries a network failure before treating the visitor as signed out', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  try {
+    const session = await freshSession();
+    let attempts = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      attempts++;
+      if (attempts < 3) throw new TypeError('network down');
+      return json({ accessToken: 'restored-token', expiresIn: 1800 });
+    });
+
+    const restoring = session.restore();
+    await vi.advanceTimersByTimeAsync(2000);
+    await restoring;
+
+    assert.equal(attempts, 3);
+    assert.equal(session.getSnapshot().authenticated, true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('a restore that keeps failing on the network is tried again on the next call', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout'] });
+  try {
+    const session = await freshSession();
+    let online = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      if (!online) throw new TypeError('network down');
+      return json({ accessToken: 'restored-token', expiresIn: 1800 });
+    });
+
+    const failing = assert.rejects(session.restore(), { status: 0 });
+    await vi.advanceTimersByTimeAsync(2000);
+    await failing;
+    assert.deepEqual(
+      { ready: session.getSnapshot().ready, authenticated: session.getSnapshot().authenticated },
+      { ready: true, authenticated: false },
+    );
+
+    online = true;
+    await session.restore();
+    assert.equal(session.getSnapshot().authenticated, true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('an expired refresh cookie ends the restore without retrying', async () => {
+  const session = await freshSession();
+  let attempts = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    attempts++;
+    return Response.json({ success: false, error: { code: 'AUTH007', message: '다시 로그인해 주세요.' } }, { status: 401 });
+  });
+
+  await session.restore();
+  await session.restore();
+  assert.equal(attempts, 1);
+  assert.equal(session.getSnapshot().authenticated, false);
+});
