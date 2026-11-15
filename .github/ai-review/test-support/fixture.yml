@@ -1,0 +1,19 @@
+# mini-yaml 자체 검사용 픽스처
+name: Fixture   # 줄 끝 주석
+on:
+  pull_request:
+    types: [opened, synchronize]
+jobs:
+  a-job:
+    timeout-minutes: 5
+    steps:
+      - name: "quoted # not comment"
+        if: ${{ steps.gate.outputs.run == 'true' }}
+        env:
+          TOKEN: '${{ secrets.X }}'
+        run: |
+          echo "a: b"  # 블록 안은 그대로
+          exit 1
+      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v4
+        with:
+          persist-credentials: false
