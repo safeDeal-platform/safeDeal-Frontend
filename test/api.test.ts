@@ -153,3 +153,37 @@ test('an expired refresh cookie ends the restore without retrying', async () => 
   assert.equal(attempts, 1);
   assert.equal(session.getSnapshot().authenticated, false);
 });
+
+test('logging out clears the local session even when the server rejects the expired access token', async () => {
+  const session = await freshSession();
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/login') {
+      return json({
+        publicId: '01K1234567890123456789ABCD', nickname: '테스트', role: 'USER',
+        emailVerified: true, trustScore: 50, accessToken: 'expired-token', expiresIn: 1,
+      });
+    }
+    return Response.json({ success: false, error: { code: 'AUTH004', message: '만료된 토큰입니다.' } }, { status: 401 });
+  });
+
+  await session.login('test@example.test', 'safe-pass');
+  await session.logout();
+  assert.equal(session.getSnapshot().authenticated, false);
+});
+
+test('a logout that cannot reach the server keeps the session so the user can retry', async () => {
+  const session = await freshSession();
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/login') {
+      return json({
+        publicId: '01K1234567890123456789ABCD', nickname: '테스트', role: 'USER',
+        emailVerified: true, trustScore: 50, accessToken: 'signed-in-token', expiresIn: 1800,
+      });
+    }
+    throw new TypeError('network down');
+  });
+
+  await session.login('test@example.test', 'safe-pass');
+  await assert.rejects(session.logout(), { status: 0 });
+  assert.equal(session.getSnapshot().authenticated, true);
+});
