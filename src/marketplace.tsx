@@ -8,6 +8,7 @@ import {
 import { api } from './api'
 import type { Category, ListingSummary, ListingDetail, FavoriteSummary } from './api'
 import { useAuth } from './auth'
+import { badgeFor, badges } from './badge'
 import './marketplace.css'
 
 type Page<T> = { items: T[]; nextCursor: string | null; hasNext: boolean }
@@ -105,6 +106,17 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={status === 'ACTIVE' ? 'mp-status active' : 'mp-status'}>{statusLabels[status] ?? '상태 확인 필요'}</span>
 }
 
+const badgeMarks = { verified: '✓', unverified: '!', suspected: '×' } as const
+
+/** Renders the server's verification badge; renders nothing when the server sent none. */
+export function VerificationBadge({ code }: { code?: string | null }) {
+  const badge = badgeFor(code)
+  if (!badge) return null
+  return <span className={'mp-verify tone-' + badge.tone} title={badge.description}>
+    <span aria-hidden="true">{badgeMarks[badge.tone]}</span> {badge.label}
+  </span>
+}
+
 function ListingGraphic({ categoryCode }: { categoryCode?: string }) {
   const Icon = categoryCode === 'DIGITAL_AUDIO' ? Headphones
     : categoryCode?.startsWith('DIGITAL') ? Laptop
@@ -124,7 +136,12 @@ function ListingCard({ listing, categoryName, children }: {
   const location = useLocation()
   const canOpen = listing.status === 'ACTIVE' || listing.status === 'SOLD'
   const content = <>
-    <ListingGraphic categoryCode={listing.categoryCode} />
+    <div className="mp-card-media">
+      {listing.thumbnailUrl
+        ? <img className="mp-card-photo" src={listing.thumbnailUrl} alt="" loading="lazy" />
+        : <ListingGraphic categoryCode={listing.categoryCode} />}
+      <VerificationBadge code={listing.verificationBadge} />
+    </div>
     <div className="mp-card-info">
       <div className="mp-card-status"><StatusBadge status={listing.status} />{categoryName && <span>{categoryName}</span>}</div>
       <h3>{listing.title}</h3>
@@ -142,14 +159,16 @@ function CatalogHero() {
   return <section className="mp-hero">
     <div className="mp-hero-copy">
       <p className="mp-hero-kicker"><ShieldCheck size={17} /> SAFEDEAL MARKET</p>
-      <h1>좋은 물건을<br />다시 만나는 곳</h1>
-      <p>원하는 매물을 찾고, 거래 내역을 바탕으로 시세를 알아보세요.</p>
+      <h1>인증샷으로 확인한<br />중고거래</h1>
+      <p>판매자가 챌린지 코드를 적어 찍은 인증샷을 서버가 검증해, 매물마다 배지로 보여 줘요.</p>
       <Link className="mp-hero-action" to="/prices" state={{ from: '/' }}><TrendingUp size={16} /> 거래 시세 보기 <ArrowRight size={15} /></Link>
     </div>
-    <div className="mp-hero-art" aria-hidden="true">
-      <div className="mp-orbit mp-orbit-outer" /><div className="mp-orbit mp-orbit-inner" />
-      <div className="mp-hero-emblem"><ShieldCheck /></div>
-    </div>
+    <ul className="mp-hero-badges" aria-label="검증 배지 안내">
+      {Object.values(badges).map((badge) => <li key={badge.tone} className={'tone-' + badge.tone}>
+        <strong><span aria-hidden="true">{badgeMarks[badge.tone]}</span> {badge.label}</strong>
+        <span>{badge.description}</span>
+      </li>)}
+    </ul>
   </section>
 }
 
@@ -304,10 +323,75 @@ async function findFavorite(session: number, id: string) {
   return (await favoriteIds(session)).has(id)
 }
 
-function ListingDetailContent({ listing }: { listing: ListingDetail }) {
+function DetailMedia({ listing }: { listing: ListingDetail }) {
+  const images = [...(listing.images ?? [])].sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)))
+  const [selected, setSelected] = useState(0)
+  const current = images[Math.min(selected, images.length - 1)]
+  if (!current) {
+    return <div className="mp-detail-media panel">
+      <ListingGraphic categoryCode={listing.category.code} />
+      <p><Camera size={16} /> 판매자가 올린 사진이 여기에 보여요.</p>
+    </div>
+  }
+  return <div className="mp-detail-media panel">
+    <img className="mp-detail-photo" src={current.url} alt={listing.title + ' 사진 ' + (selected + 1)} />
+    {images.length > 1 && <div className="mp-thumbs" role="group" aria-label="사진 고르기">
+      {images.map((image, index) => <button key={image.url + index} type="button" aria-pressed={index === selected}
+        aria-label={'사진 ' + (index + 1) + ' 보기'} onClick={() => setSelected(index)}>
+        <img src={image.url} alt="" />
+      </button>)}
+    </div>}
+  </div>
+}
+
+type OwnerStep = 'idle' | 'confirm-delete' | 'busy'
+
+function OwnerActions({ listing, onChange }: { listing: ListingDetail; onChange: (next: ListingDetail | null) => void }) {
+  const [step, setStep] = useState<OwnerStep>('idle')
+  const [error, setError] = useState('')
+
+  async function run(work: () => Promise<void>) {
+    setStep('busy')
+    setError('')
+    try {
+      await work()
+      setStep('idle')
+    } catch (cause) {
+      setError(errorMessage(cause))
+      setStep('idle')
+    }
+  }
+
+  const sold = listing.status === 'SOLD'
+  return <div className="mp-owner stack">
+    <p className="mp-owner-note">내가 올린 매물이에요. 채팅은 구매자가 먼저 시작해요.</p>
+    {step === 'confirm-delete' ? <div className="mp-inline-alert" role="alert">
+      <span>매물을 삭제하면 목록과 검색에서 사라져요. 삭제할까요?</span>
+      <div className="actions">
+        <button type="button" className="button mp-danger" onClick={() => void run(async () => {
+          await api.deleteListing(listing.publicId)
+          onChange(null)
+        })}>삭제</button>
+        <button type="button" className="button" onClick={() => setStep('idle')}>취소</button>
+      </div>
+    </div> : <div className="actions">
+      <button type="button" className="button primary" disabled={step === 'busy'} onClick={() => void run(async () => {
+        const result = await api.changeListingStatus(listing.publicId, sold ? 'RESTORE_MANUAL_SOLD' : 'MARK_SOLD')
+        onChange({ ...listing, status: result.status })
+      })}>{sold ? '판매중으로 되돌리기' : '판매완료로 바꾸기'}</button>
+      <button type="button" className="button mp-danger" disabled={step === 'busy'} onClick={() => setStep('confirm-delete')}>삭제</button>
+    </div>}
+    {sold && <p className="mp-note">직접 판매완료로 바꾼 매물은 24시간 안에만 되돌릴 수 있어요.</p>}
+    {error && <p className="mp-error" role="alert">{error}</p>}
+  </div>
+}
+
+function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; onChange: (next: ListingDetail | null) => void }) {
   const auth = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
+  const isOwner = Boolean(listing.seller && auth.account && auth.account.publicId === listing.seller.publicId)
+  const badge = badgeFor(listing.verificationBadge)
   const [favorite, setFavorite] = useState<FavoriteState>({ value: null, error: '' })
   const [favoriteRetry, setFavoriteRetry] = useState(0)
   const [favoriteBusy, setFavoriteBusy] = useState(false)
@@ -321,7 +405,12 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
   }, [])
 
   useEffect(() => {
-    if (!auth.authenticated) return
+    if (!auth.authenticated || isOwner) return
+    // When the server says whether this viewer favorited the listing, the list scan is skipped.
+    if (listing.favorited !== undefined) {
+      setFavorite({ value: listing.favorited, error: '' })
+      return
+    }
     const controller = new AbortController()
     findFavorite(auth.sessionKey, listing.publicId).then((value) => {
       if (!controller.signal.aborted) setFavorite({ value, error: '' })
@@ -329,7 +418,7 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
       if (!controller.signal.aborted) setFavorite({ value: null, error: errorMessage(cause) })
     })
     return () => controller.abort()
-  }, [auth.authenticated, auth.sessionKey, listing.publicId, favoriteRetry])
+  }, [auth.authenticated, auth.sessionKey, isOwner, listing.publicId, listing.favorited, favoriteRetry])
 
   const from = location.pathname + location.search
   const signIn = () => navigate('/login', { state: { from } })
@@ -376,23 +465,30 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
 
   const favorited = auth.authenticated && favorite.value === true
   return <div className="mp-detail-grid">
-    <div className="mp-detail-media panel">
-      <ListingGraphic categoryCode={listing.category.code} />
-      <p><Camera size={16} /> 사진 및 확대 보기는 이미지 API 연동 예정</p>
+    <div className="stack">
+      <DetailMedia listing={listing} />
+      {badge && <div className={'mp-badge-note panel tone-' + badge.tone}>
+        <VerificationBadge code={listing.verificationBadge} />
+        <span>{badge.description}</span>
+      </div>}
     </div>
     <div className="mp-detail-body panel">
       <p className="eyebrow">{[listing.category.parentName, listing.category.name].filter(Boolean).join(' / ')}</p>
-      <StatusBadge status={listing.status} />
+      <div className="actions"><StatusBadge status={listing.status} /><VerificationBadge code={listing.verificationBadge} /></div>
       <h1>{listing.title}</h1>
       <strong className="mp-detail-price">{won.format(listing.price)}원</strong>
       <dl className="mp-detail-facts">
         <div><dt>상품 상태</dt><dd>{conditionLabels[listing.itemCondition]}</dd></div>
         <div><dt>등록 지역</dt><dd>{[listing.region.sido, listing.region.sigungu].filter(Boolean).join(' ')}</dd></div>
         <div><dt>등록일</dt><dd>{date.format(new Date(listing.createdAt))}</dd></div>
-        <div><dt>조회</dt><dd>{won.format(listing.viewCount)}</dd></div>
+        <div><dt>조회</dt><dd>{won.format(listing.viewCount)}{listing.favoriteCount !== undefined && ' · 찜 ' + won.format(listing.favoriteCount)}</dd></div>
       </dl>
+      {listing.seller && <div className="mp-seller">
+        <span className="mp-avatar" aria-hidden="true">{listing.seller.nickname.slice(0, 1)}</span>
+        <span className="stack"><strong>{listing.seller.nickname}</strong><span className="muted">신뢰도 {listing.seller.trustScore.toFixed(1)}</span></span>
+      </div>}
       <div className="mp-detail-description"><h2>상품 설명</h2><p>{listing.description}</p></div>
-      <div className="actions">
+      {isOwner ? <OwnerActions listing={listing} onChange={onChange} /> : <div className="actions">
         <button type="button" className="button mp-heart-button" aria-pressed={favorited}
           disabled={!auth.ready || favoriteBusy || (auth.authenticated && favorite.value === null) || (listing.status !== 'ACTIVE' && !favorited)}
           onClick={toggleFavorite}><Heart size={17} fill={favorited ? 'currentColor' : 'none'} /> {favorited ? '찜 해제' : '찜하기'}</button>
@@ -400,7 +496,8 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
           <MessageCircle size={17} /> {chatBusy ? '연결 중' : listing.status === 'SOLD' ? '기존 채팅 열기' : '채팅방 열기'}
         </button>
         <Link className="button" to={'/prices?category=' + encodeURIComponent(listing.category.code)} state={{ from }}><TrendingUp size={17} /> 시세 보기</Link>
-      </div>
+      </div>}
+      {isOwner && <Link className="button" to={'/prices?category=' + encodeURIComponent(listing.category.code)} state={{ from }}><TrendingUp size={17} /> 시세 보기</Link>}
       {favorite.error && <div className="mp-inline-alert" role="alert">{favorite.error}
         {favorite.value === null && <button className="button" onClick={() => {
           setFavorite({ value: null, error: '' })
@@ -408,13 +505,14 @@ function ListingDetailContent({ listing }: { listing: ListingDetail }) {
         }}>찜 상태 다시 확인</button>}
       </div>}
       {chatError && <p className="mp-error" role="alert">{chatError}</p>}
-      <p className="mp-note">검증 배지, 거래 방식, 택배비와 신고는 연동 예정이에요.</p>
+      <p className="mp-note">거래 방식, 택배비와 신고는 연동 예정이에요.</p>
     </div>
   </div>
 }
 
 function ListingRequest({ id }: { id: string }) {
   const auth = useAuth()
+  const navigate = useNavigate()
   const [listing, setListing] = useState<ListingDetail | null>(null)
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
@@ -434,7 +532,10 @@ function ListingRequest({ id }: { id: string }) {
     setRevision((value) => value + 1)
   }}>다시 시도</button></div>
   if (!listing) return <p className="mp-state" role="status">매물 정보를 불러오는 중입니다.</p>
-  return <ListingDetailContent key={auth.sessionKey} listing={listing} />
+  return <ListingDetailContent key={auth.sessionKey} listing={listing} onChange={(next) => {
+    if (next) setListing(next)
+    else navigate('/account?tab=selling', { replace: true, state: { deleted: listing.title } })
+  }} />
 }
 
 export function ListingPage() {

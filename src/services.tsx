@@ -232,9 +232,24 @@ export function AccountPage() {
   if (!auth.ready) return <p className="muted" role="status">로그인 상태를 확인하고 있어요.</p>
   if (!auth.authenticated) return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />
 
+  const deleted = (location.state as { deleted?: string } | null)?.deleted
+  const account = auth.account
   return (
     <section className="service-page">
-      <ServiceHeading eyebrow="MY SAFEDEAL" title="마이페이지" description={auth.account ? auth.account.nickname + '님의 SafeDeal' : undefined} />
+      <div className="panel service-account">
+        <span className="service-avatar" aria-hidden="true">{account ? account.nickname.slice(0, 1) : '?'}</span>
+        <div className="service-account-name">
+          <p className="eyebrow">MY SAFEDEAL</p>
+          <h1>{account ? account.nickname + '님' : '마이페이지'}</h1>
+          <p className="muted">{account
+            ? (account.emailVerified === true ? '이메일 인증 완료' : account.emailVerified === false ? '이메일 인증 대기' : '이메일 인증 상태는 다시 로그인하면 보여요')
+            : '계정 정보는 로그인 직후에 보여요. 새로고침 후에도 보이게 하려면 내 정보 조회 API가 필요해요.'}</p>
+        </div>
+        {account && <dl className="service-account-stats">
+          <div><dt>신뢰도</dt><dd>{account.trustScore.toFixed(1)}<span className="muted"> / 100</span></dd></div>
+        </dl>}
+      </div>
+      {deleted && <p className="service-notice" role="status">'{deleted}' 매물을 삭제했어요.</p>}
       <nav className="service-tabs" aria-label="마이페이지 메뉴">
         {accountTabs.map((tab) => (
           <button className="button" type="button" key={tab.value} aria-pressed={selected.value === tab.value} onClick={() => setParams({ tab: tab.value }, { replace: true })}>{tab.label}</button>
