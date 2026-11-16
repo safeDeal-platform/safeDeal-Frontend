@@ -47,6 +47,19 @@ test('좁은 화면에서는 상단 메뉴가 한 줄에서 가로로 밀리고,
   expect((await guide.boundingBox())!.height).toBeLessThan(90)
 })
 
+test('목록 화면은 필터를 바꿔도 React key 경고 없이 다시 그려진다', async ({ page }) => {
+  const keyWarnings: string[] = []
+  page.on('console', (message) => { if (message.text().includes('same key')) keyWarnings.push(message.text()) })
+  await page.goto('/')
+  await expect(page.getByText('조건에 맞는 매물이 없어요.')).toBeVisible()
+  await page.getByLabel('최소 가격 (원)').fill('1000')
+  await page.getByRole('button', { name: '필터 적용' }).click()
+  await expect(page).toHaveURL(/minPrice=1000/)
+  await expect(page.getByLabel('최소 가격 (원)')).toHaveValue('1000')
+  await expect(page.getByText('조건에 맞는 매물이 없어요.')).toBeVisible()
+  expect(keyWarnings).toEqual([])
+})
+
 test('판매자 본인은 상세에서 채팅 대신 판매완료·삭제를 쓰고, 삭제하면 마이페이지로 돌아간다', async ({ page }) => {
   const calls: string[] = []
   await page.route('**/api/listings/' + detail.publicId, async (route) => {
