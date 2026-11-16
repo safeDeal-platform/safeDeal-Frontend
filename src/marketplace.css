@@ -287,8 +287,14 @@
 }
 
 @media (max-width: 650px) {
-  .mp-hero { min-height: 238px; }
-  .mp-hero-badges { min-width: 0; width: 100%; }
+  .mp-hero { min-height: 0; gap: 20px; padding: 24px 20px; }
+  .mp-hero h1 { font-size: 32px; }
+  .mp-hero-copy > p:not(.mp-hero-kicker) { font-size: 14px; }
+  /* 좁은 화면에서는 배지 이름만 한 줄 칩으로 보이고, 설명은 화면 낭독기에만 남긴다. */
+  .mp-hero-badges { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; width: 100%; }
+  .mp-hero-badges li { padding: 6px 11px; border-radius: 999px; }
+  .mp-hero-badges strong { font-size: 13px; }
+  .mp-hero-badges li > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .mp-grid, .mp-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mp-detail-grid, .mp-sale-grid { grid-template-columns: 1fr; }
   .mp-detail-media .mp-listing-art { min-height: 240px; }

@@ -34,6 +34,19 @@ test('목록 카드는 서버가 준 썸네일과 검증 배지를 보여 주고
   await expect(withoutBadge.getByText(/인증됨|미인증|위조 의심/)).toHaveCount(0)
 })
 
+test('좁은 화면에서는 상단 메뉴가 한 줄에서 가로로 밀리고, 배지 안내는 이름만 칩으로 보인다', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto('/')
+  const nav = page.getByRole('navigation', { name: '주요 메뉴' })
+  const box = await nav.boundingBox()
+  expect(box!.height).toBeLessThan(50)
+  expect(await nav.evaluate((n) => n.scrollWidth > n.clientWidth)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  const guide = page.getByRole('list', { name: '검증 배지 안내' })
+  await expect(guide.getByText('인증됨')).toBeVisible()
+  expect((await guide.boundingBox())!.height).toBeLessThan(90)
+})
+
 test('판매자 본인은 상세에서 채팅 대신 판매완료·삭제를 쓰고, 삭제하면 마이페이지로 돌아간다', async ({ page }) => {
   const calls: string[] = []
   await page.route('**/api/listings/' + detail.publicId, async (route) => {
