@@ -45,6 +45,10 @@ test('좁은 화면에서는 상단 메뉴가 한 줄에서 가로로 밀리고,
   const guide = page.getByRole('list', { name: '검증 배지 안내' })
   await expect(guide.getByText('인증됨')).toBeVisible()
   expect((await guide.boundingBox())!.height).toBeLessThan(90)
+  // 375px에서는 세 칩이 한 줄에 놓여야 한다(더 좁은 화면에서는 줄바꿈을 허용한다).
+  const tops = await guide.getByRole('listitem').evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)))
+  expect(tops).toHaveLength(3)
+  expect(new Set(tops).size).toBe(1)
 })
 
 test('목록 화면은 필터를 바꿔도 React key 경고 없이 다시 그려진다', async ({ page }) => {
