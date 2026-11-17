@@ -263,7 +263,7 @@ export function AccountPage() {
         <section className="panel service-panel"><h2>주문·거래</h2><p className="muted">안전결제와 주문·배송 내역은 연동 예정이에요.</p><Link className="button" to="/cart">장바구니</Link></section>
       )}
       {selected.value === 'reports' && (
-        <section className="panel service-panel"><h2>내 신고</h2><p className="muted">매물·채팅 신고와 처리 내역은 연동 예정이에요.</p><Link className="button" to="/support">고객센터</Link></section>
+        <section className="panel service-panel"><h2>내 신고</h2><p className="muted">매물 신고는 매물 상세 화면에서 할 수 있어요. 신고 처리 내역과 채팅 신고는 연동 예정이에요.</p><Link className="button" to="/support">고객센터</Link></section>
       )}
       {selected.value === 'profile' && (
         <section className="panel service-panel">
@@ -368,7 +368,7 @@ export function SupportPage() {
         <h2>거래 도움말</h2>
         <details><summary>거래 시세는 어떻게 확인하나요?</summary><p>매물 상세에서 시세를 열거나 상품 유형과 조회 기간을 선택해 거래 통계를 확인할 수 있어요.</p><Link to="/prices">매물 시세 조회</Link></details>
         <details><summary>채팅에서 위치나 사진을 공유할 수 있나요?</summary><p>채팅방을 열 수 있어요. 메시지, 만날 장소와 사진 공유는 연동 예정이에요.</p></details>
-        <details><summary>문제가 있는 매물과 대화는 어떻게 신고하나요?</summary><p>앱에서 매물과 채팅을 신고하는 기능은 연동 예정이에요.</p></details>
+        <details><summary>문제가 있는 매물과 대화는 어떻게 신고하나요?</summary><p>매물은 상세 화면 아래의 “이 매물 신고하기”에서 사유를 골라 신고할 수 있어요. 채팅 신고는 연동 예정이에요.</p></details>
       </div>
     </section>
   )

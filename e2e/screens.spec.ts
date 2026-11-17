@@ -120,3 +120,58 @@ test('다른 사람의 매물은 구매자 버튼을 보여 주고, 서버가 �
   await expect(page.getByText('신뢰도 72.5')).toBeVisible()
   expect(favoritesRead).toBe(false)
 })
+
+test('다른 사람의 매물을 사유와 함께 신고하고, 서버가 거절하면 이유를 안내하고, 접수한 신고는 취소할 수 있다', async ({ page }) => {
+  const bodies: unknown[] = []
+  let cancelled = ''
+  await page.route('**/api/listings/' + detail.publicId, (route) => route.fulfill({ json: { success: true, data: {
+    ...detail, seller: { publicId: '01JOTHER000000000000000001', nickname: '다른사람', trustScore: 72.5 }, favorited: false,
+  } } }))
+  await page.route('**/api/reports', (route) => {
+    bodies.push(route.request().postDataJSON())
+    if (bodies.length === 1) return route.fulfill({ status: 409, json: { success: false, error: { code: 'RPT001', message: '이미 같은 사유로 접수된 신고가 있습니다.' } } })
+    return route.fulfill({ status: 201, json: { success: true, data: { reportId: '01JREPORT0000000000000001', status: 'RECEIVED', receivedAt: '2026-11-17T01:00:00Z' } } })
+  })
+  await page.route('**/api/reports/*/cancel', (route) => { cancelled = route.request().url(); return route.fulfill({ json: { success: true } }) })
+
+  await page.goto('/login')
+  await page.getByLabel('이메일').fill('buyer@example.test')
+  await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.evaluate((id) => { window.history.pushState({}, '', '/listings/' + id); window.dispatchEvent(new PopStateEvent('popstate')) }, detail.publicId)
+
+  await page.getByRole('button', { name: '이 매물 신고하기' }).click()
+  const form = page.getByRole('form', { name: '매물 신고' })
+  await form.getByRole('button', { name: '신고 접수' }).click()
+  await expect(form.getByRole('alert')).toHaveText('신고 사유를 골라 주세요.')
+  expect(bodies).toHaveLength(0)
+
+  await form.getByRole('radio', { name: /사기 의심/ }).check()
+  await form.getByLabel(/자세한 내용/).fill('선입금을 요구해요')
+  await expect(form.getByText('9 / 1,000자')).toBeVisible()
+  await form.getByRole('button', { name: '신고 접수' }).click()
+  await expect(form.getByRole('alert')).toContainText('이미 같은 사유로 접수한 신고가 있어요')
+
+  await form.getByRole('radio', { name: /스팸·광고/ }).check()
+  await form.getByRole('button', { name: '신고 접수' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '신고를 접수했어요' })).toBeVisible()
+  expect(bodies).toEqual([
+    { targetType: 'LISTING', targetId: detail.publicId, reasonCode: 'FRAUD', detail: '선입금을 요구해요' },
+    { targetType: 'LISTING', targetId: detail.publicId, reasonCode: 'SPAM', detail: '선입금을 요구해요' },
+  ])
+
+  await page.getByRole('button', { name: '신고 취소' }).click()
+  await expect(page.getByText('신고를 취소했어요.')).toBeVisible()
+  expect(cancelled).toContain('/api/reports/01JREPORT0000000000000001/cancel')
+  await expect(page.getByRole('button', { name: '이 매물 신고하기' })).toBeVisible()
+})
+
+test('로그인하지 않고 신고하기를 누르면 로그인 화면으로 보낸다', async ({ page }) => {
+  await page.route('**/api/listings/' + detail.publicId, (route) => route.fulfill({ json: { success: true, data: {
+    ...detail, seller: { publicId: '01JOTHER000000000000000001', nickname: '다른사람', trustScore: 72.5 },
+  } } }))
+  await page.goto('/listings/' + detail.publicId)
+  await page.getByRole('button', { name: '이 매물 신고하기' }).click()
+  await expect(page).toHaveURL(/\/login$/)
+})
