@@ -46,18 +46,22 @@ export function ListingReport({ listingId }: { listingId: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  // 폼을 연 뒤 세션이 끝났을 수 있으므로, 서버에 보내기 전에도 매번 확인한다.
+  function needsSignIn() {
+    if (auth.authenticated) return false
+    navigate('/login', { state: { from: location.pathname + location.search } })
+    return true
+  }
+
   function open() {
-    if (!auth.authenticated) {
-      navigate('/login', { state: { from: location.pathname + location.search } })
-      return
-    }
+    if (needsSignIn()) return
     setError('')
     setStep({ kind: 'form' })
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (busy) return
+    if (busy || needsSignIn()) return
     if (!reason) {
       setError('신고 사유를 골라 주세요.')
       return
@@ -77,7 +81,7 @@ export function ListingReport({ listingId }: { listingId: string }) {
   }
 
   async function cancel(reportId: string) {
-    if (busy) return
+    if (busy || needsSignIn()) return
     setBusy(true)
     setError('')
     try {
