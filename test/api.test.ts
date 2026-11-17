@@ -187,3 +187,24 @@ test('a logout that cannot reach the server keeps the session so the user can re
   await assert.rejects(session.logout(), { status: 0 });
   assert.equal(session.getSnapshot().authenticated, true);
 });
+
+test('listing report sends the LISTING target, omits a blank detail, and cancels by public report id', async () => {
+  const calls: { url: string; method?: string; body?: unknown }[] = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input);
+    calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url === '/api/reports') return json({ reportId: '01JREPORT0000000000000001', status: 'RECEIVED', receivedAt: '2026-11-17T01:00:00Z' }, 201);
+    return json(undefined);
+  });
+
+  const receipt = await api.reportListing('01JLISTING0000000000000001', 'FRAUD', '   ');
+  await api.reportListing('01JLISTING0000000000000001', 'ETC', '가품 같아요');
+  await api.cancelReport(receipt.reportId);
+
+  assert.equal(receipt.reportId, '01JREPORT0000000000000001');
+  assert.deepEqual(calls, [
+    { url: '/api/reports', method: 'POST', body: { targetType: 'LISTING', targetId: '01JLISTING0000000000000001', reasonCode: 'FRAUD' } },
+    { url: '/api/reports', method: 'POST', body: { targetType: 'LISTING', targetId: '01JLISTING0000000000000001', reasonCode: 'ETC', detail: '가품 같아요' } },
+    { url: '/api/reports/01JREPORT0000000000000001/cancel', method: 'PATCH', body: undefined },
+  ]);
+});

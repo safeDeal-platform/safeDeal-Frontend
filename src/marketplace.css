@@ -304,3 +304,18 @@
 @media (prefers-reduced-motion: reduce) {
   .mp-listing-card { transition: none; }
 }
+
+.mp-report-entry { display: grid; justify-items: start; gap: 6px; }
+.button.mp-report-open { border-color: transparent; background: transparent; color: #645b75; font-size: 13px; padding-inline: 4px; }
+.button.mp-report-open:hover { color: #a3261b; }
+.mp-report { display: grid; gap: 14px; justify-self: stretch; width: 100%; border-color: #f2c4bf; }
+.mp-report fieldset { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.mp-report legend { margin-bottom: 6px; font-weight: 700; }
+.mp-report-reason { display: flex; align-items: flex-start; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.mp-report-reason:has(input:checked) { border-color: #a3261b; background: #fff6f5; }
+.mp-report-reason input { margin-top: 4px; accent-color: #a3261b; }
+.mp-report-reason span { display: grid; gap: 1px; }
+.mp-report-reason small { color: #645b75; font-size: 12px; }
+.mp-report-detail { gap: 6px; font-weight: 700; }
+.mp-report-detail textarea { font-weight: 400; }
+.mp-report-detail small { justify-self: end; font-weight: 500; }

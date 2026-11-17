@@ -334,6 +334,15 @@ function queryPath(path: string, filters: Record<string, string | number | undef
   return query ? `${path}?${query}` : path;
 }
 
+/** 매물에 붙일 수 있는 신고 사유. ABUSE(욕설)는 채팅 전용이라 매물 신고에는 없다. */
+export type ListingReportReason = 'FRAUD' | 'PROHIBITED' | 'SPAM' | 'IMPERSONATION' | 'ETC';
+export type ReportStatus = 'RECEIVED' | 'REVIEWING' | 'RESOLVED' | 'REJECTED' | 'CANCELLED';
+export interface ReportReceipt {
+  reportId: string;
+  status: ReportStatus;
+  receivedAt: string;
+}
+
 const listingPath = (id: string) => `/api/listings/${encodeURIComponent(id)}`;
 
 export const api = {
@@ -384,5 +393,12 @@ export const api = {
   },
   readNotification(id: number) {
     return request<void>(`/api/notifications/${encodeURIComponent(id)}/read`, json('PATCH'));
+  },
+  reportListing(listingId: string, reasonCode: ListingReportReason, detail: string) {
+    const body = { targetType: 'LISTING', targetId: listingId, reasonCode, ...(detail.trim() ? { detail } : {}) };
+    return request<ReportReceipt>('/api/reports', json('POST', body));
+  },
+  cancelReport(reportId: string) {
+    return request<void>(`/api/reports/${encodeURIComponent(reportId)}/cancel`, json('PATCH'));
   },
 };

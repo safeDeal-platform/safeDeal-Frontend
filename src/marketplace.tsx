@@ -9,6 +9,7 @@ import { api } from './api'
 import type { Category, ListingSummary, ListingDetail, FavoriteSummary } from './api'
 import { useAuth } from './auth'
 import { badgeFor, badges } from './badge'
+import { ListingReport } from './report'
 import './marketplace.css'
 
 type Page<T> = { items: T[]; nextCursor: string | null; hasNext: boolean }
@@ -506,7 +507,8 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
         }}>찜 상태 다시 확인</button>}
       </div>}
       {chatError && <p className="mp-error" role="alert">{chatError}</p>}
-      <p className="mp-note">거래 방식, 택배비와 신고는 연동 예정이에요.</p>
+      {!isOwner && <ListingReport key={listing.publicId} listingId={listing.publicId} />}
+      <p className="mp-note">거래 방식과 택배비는 연동 예정이에요.</p>
     </div>
   </div>
 }
