@@ -175,3 +175,43 @@ test('로그인하지 않고 신고하기를 누르면 로그인 화면으로 �
   await page.getByRole('button', { name: '이 매물 신고하기' }).click()
   await expect(page).toHaveURL(/\/login$/)
 })
+
+const profile = { publicId: me.publicId, email: 'seller@example.test', nickname: me.nickname, emailVerified: true, trustScore: 50, createdAt: '2026-08-01T00:00:00Z' }
+
+test('새로고침으로 다시 열어도 내 정보를 불러와 내 매물에는 신고 대신 판매자 버튼을 보여 준다', async ({ page }) => {
+  await page.route('**/api/auth/reissue', (route) => route.fulfill({ json: { success: true, data: { accessToken: 'test-access', expiresIn: 900 } } }))
+  await page.route((url) => url.pathname === '/api/users/me', (route) => route.fulfill({ json: { success: true, data: profile } }))
+  await page.route('**/api/listings/' + detail.publicId, (route) => route.fulfill({ json: { success: true, data: detail } }))
+
+  await page.goto('/listings/' + detail.publicId)
+  await expect(page.getByText('내가 올린 매물이에요')).toBeVisible()
+  await expect(page.getByRole('button', { name: /이 매물 신고하기/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '판매완료로 바꾸기' })).toBeVisible()
+
+  await page.goto('/account?tab=profile')
+  await expect(page.getByRole('heading', { name: '안전거래러님' })).toBeVisible()
+  await expect(page.getByText('seller@example.test · 이메일 인증 완료 · 2026년 8월 가입')).toBeVisible()
+})
+
+test('내 정보를 못 불러오면 로그인은 유지하고 다시 불러오기로 채운다', async ({ page }) => {
+  let online = false
+  await page.route('**/api/auth/reissue', (route) => route.fulfill({ json: { success: true, data: { accessToken: 'test-access', expiresIn: 900 } } }))
+  await page.route((url) => url.pathname === '/api/users/me', (route) => online
+    ? route.fulfill({ json: { success: true, data: profile } })
+    : route.fulfill({ status: 503, json: { success: false, error: { code: 'C500', message: '잠시 후 다시 시도해 주세요.' } } }))
+
+  await page.goto('/account')
+  await expect(page.getByText('내 정보를 불러오지 못했어요.')).toBeVisible()
+  online = true
+  await page.getByRole('button', { name: '다시 불러오기' }).click()
+  await expect(page.getByRole('heading', { name: '안전거래러님' })).toBeVisible()
+})
+
+test('정지된 계정으로 확인되면 로그인 상태를 끝내고 이유를 알린다', async ({ page }) => {
+  await page.route('**/api/auth/reissue', (route) => route.fulfill({ json: { success: true, data: { accessToken: 'test-access', expiresIn: 900 } } }))
+  await page.route((url) => url.pathname === '/api/users/me', (route) => route.fulfill({ status: 403, json: { success: false, error: { code: 'AUTH005', message: '이용이 제한된 계정입니다.' } } }))
+
+  await page.goto('/')
+  await expect(page.getByRole('alert').filter({ hasText: '이용이 제한된 계정이라 로그인 상태를 끝냈어요.' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '로그인' })).toBeVisible()
+})

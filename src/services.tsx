@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, ChartNoAxesCombined, Headphones, MessageCircle, Plus, ShoppingCart, Siren } from 'lucide-react'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
-import { api, type NotificationItem, type PriceStatistics } from './api'
+import { api, authSession, type NotificationItem, type PriceStatistics } from './api'
 import { useAuth } from './auth'
 import './services.css'
 
@@ -223,6 +223,22 @@ const accountTabs = [
   { value: 'profile', label: '프로필·신뢰도' },
 ] as const
 
+const joined = new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', timeZone: 'Asia/Seoul' })
+
+/** 로그인은 됐는데 내 정보(/me)가 아직 없을 때: 불러오는 중이거나, 실패했으면 다시 불러오기. */
+function ProfileLoadState() {
+  const auth = useAuth()
+  const [busy, setBusy] = useState(false)
+  if (!auth.profileError) return <p className="muted" role="status">내 정보를 불러오고 있어요.</p>
+  return <p className="muted" role="alert">
+    내 정보를 불러오지 못했어요.{' '}
+    <button type="button" className="button" disabled={busy} onClick={() => {
+      setBusy(true)
+      void authSession.reloadProfile().finally(() => setBusy(false))
+    }}>{busy ? '불러오는 중' : '다시 불러오기'}</button>
+  </p>
+}
+
 export function AccountPage() {
   const auth = useAuth()
   const location = useLocation()
@@ -241,14 +257,21 @@ export function AccountPage() {
         <div className="service-account-name">
           <p className="eyebrow">MY SAFEDEAL</p>
           <h1>{account ? account.nickname + '님' : '마이페이지'}</h1>
-          <p className="muted">{account
-            ? (account.emailVerified === true ? '이메일 인증 완료' : account.emailVerified === false ? '이메일 인증 대기' : '이메일 인증 상태는 다시 로그인하면 보여요')
-            : '계정 정보는 로그인 직후에 보여요. 새로고침 후에도 보이게 하려면 내 정보 조회 API가 필요해요.'}</p>
+          {account ? (
+            <p className="muted">{[
+              account.email,
+              account.emailVerified === true ? '이메일 인증 완료' : account.emailVerified === false ? '이메일 인증 대기' : '이메일 인증 상태 확인 중',
+              account.createdAt && `${joined.format(new Date(account.createdAt))} 가입`,
+            ].filter(Boolean).join(' · ')}</p>
+          ) : <ProfileLoadState />}
         </div>
         {account && <dl className="service-account-stats">
           <div><dt>신뢰도</dt><dd>{account.trustScore.toFixed(1)}<span className="muted"> / 100</span></dd></div>
         </dl>}
       </div>
+      {account?.emailVerified === false && (
+        <p className="service-notice" role="status">이메일 인증을 마치면 매물 등록과 채팅을 할 수 있어요. <Link to="/email/verify">인증 메일 다시 받기</Link></p>
+      )}
       {deleted && <p className="service-notice" role="status">'{deleted}' 매물을 삭제했어요.</p>}
       <nav className="service-tabs" aria-label="마이페이지 메뉴">
         {accountTabs.map((tab) => (
@@ -271,10 +294,12 @@ export function AccountPage() {
           {auth.account ? (
             <dl className="service-price-metrics">
               <div><dt>닉네임</dt><dd>{auth.account.nickname}</dd></div>
-              <div><dt>이메일 인증</dt><dd>{auth.account.emailVerified === true ? '완료' : auth.account.emailVerified === false ? '대기' : '다시 로그인해 확인'}</dd></div>
+              {auth.account.email && <div><dt>이메일</dt><dd>{auth.account.email}</dd></div>}
+              <div><dt>이메일 인증</dt><dd>{auth.account.emailVerified === true ? '완료' : auth.account.emailVerified === false ? '대기' : '확인 중'}</dd></div>
               <div><dt>신뢰도</dt><dd>{auth.account.trustScore.toFixed(1)} / 100</dd></div>
+              {auth.account.createdAt && <div><dt>가입일</dt><dd>{joined.format(new Date(auth.account.createdAt))}</dd></div>}
             </dl>
-          ) : <p className="muted">프로필 재조회는 연동 예정이에요. 계정 정보는 로그인 직후 확인할 수 있어요.</p>}
+          ) : <ProfileLoadState />}
           {auth.account?.emailVerified === false && <Link className="button" to="/email/verify">이메일 인증</Link>}
         </section>
       )}

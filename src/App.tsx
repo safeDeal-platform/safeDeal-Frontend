@@ -101,6 +101,16 @@ function BackLink() {
   </button></div>
 }
 
+/** 새로고침 중 정지 계정으로 확인돼 세션을 끝냈을 때, 어느 화면에 있든 이유를 알린다. 로그인 화면은 자체 안내가 있다. */
+function RestrictedNotice() {
+  const { restricted } = useAuth()
+  const location = useLocation()
+  if (!restricted || location.pathname === '/login') return null
+  return <p className="error" role="alert">
+    이용이 제한된 계정이라 로그인 상태를 끝냈어요. <Link to="/support">고객센터</Link>에서 이유를 확인할 수 있어요.
+  </p>
+}
+
 export function App() {
   const location = useLocation()
   useEffect(() => { window.scrollTo(0, 0) }, [location.pathname])
@@ -111,6 +121,7 @@ export function App() {
       <Header />
       <main className="container page" id="main">
         <BackLink />
+        <RestrictedNotice />
         <Routes>
           <Route path="/" element={<BrowsePage />} />
           <Route path="/listings/:id" element={<ListingPage />} />

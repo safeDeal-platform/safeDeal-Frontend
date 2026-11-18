@@ -77,7 +77,7 @@ export function AuthPage({ kind }: { kind: AuthPageKind }) {
 }
 
 function AuthScreen({ kind }: { kind: AuthPageKind }) {
-  const { authenticated, account } = useAuth();
+  const { authenticated, account, restricted } = useAuth();
   const [search] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -184,8 +184,11 @@ function AuthScreen({ kind }: { kind: AuthPageKind }) {
       </header>
       {error && <p className="error" role="alert">{error}</p>}
       {message && <p className="auth-message" role="status">{message}</p>}
+      {kind === 'login' && restricted && !error && (
+        <p className="error" role="alert">이용이 제한된 계정이라 로그인 상태를 끝냈어요. 자세한 내용은 고객센터로 문의해 주세요.</p>
+      )}
       {kind === 'verify' && authenticated && (account === null || account.emailVerified === null) && (
-        <p className="muted">현재 로그인한 계정의 인증 상태를 확인하려면 다시 로그인해 주세요.</p>
+        <p className="muted" role="status">로그인한 계정의 인증 상태를 확인하고 있어요.</p>
       )}
       {showsForm && (
         <form className="stack" onSubmit={(event) => void submit(event)}>
