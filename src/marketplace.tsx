@@ -129,6 +129,15 @@ function ListingGraphic({ categoryCode }: { categoryCode?: string }) {
   return <span className="mp-listing-art" aria-hidden="true"><Icon /></span>
 }
 
+/**
+ * 제재·삭제된 매물은 다른 사람에게 제목·가격·상태를 보여 주지 않는다.
+ * 목록·상세는 백엔드가 이미 숨기고(목록은 판매중만, 상세는 404), 찜 목록만 남아 있어 여기서 가린다.
+ * 제재가 풀릴 수 있으므로 '거래 불가' 같은 낙인 문구도 쓰지 않는다.
+ */
+function isUnavailable(status: ListingSummary['status']) {
+  return status === 'BLOCKED' || status === 'DELETED'
+}
+
 function ListingCard({ listing, categoryName, children }: {
   listing: Pick<ListingSummary, 'publicId' | 'title' | 'price' | 'status'> & Partial<ListingSummary>
   categoryName?: string
@@ -572,8 +581,21 @@ function FavoriteResults({ session }: { session: number }) {
   return <>
     {removeError && <p className="mp-error" role="alert">{removeError}</p>}
     {page.items.length > 0 && <div className="mp-grid">
-      {page.items.filter(({ listing }) => !removed.current.has(listing.publicId)).map(({ listing }) => (
-        <ListingCard key={listing.publicId} listing={listing}>
+      {page.items.filter(({ listing }) => !removed.current.has(listing.publicId)).map(({ listing }) => isUnavailable(listing.status) || listing.title === null || listing.price === null ? (
+        <article key={listing.publicId} className="mp-listing-card mp-listing-unavailable">
+          <div>
+            <div className="mp-card-media"><ListingGraphic /></div>
+            <div className="mp-card-info">
+              <h3>더 이상 볼 수 없는 매물</h3>
+              <span className="muted">판매가 중단됐거나 삭제된 매물이에요.</span>
+            </div>
+          </div>
+          <div className="mp-card-actions"><button type="button" className="button mp-heart-button" aria-pressed="true"
+            disabled={removing.includes(listing.publicId)} aria-label="볼 수 없는 매물 찜 해제"
+            onClick={() => void remove(listing.publicId)}><Heart size={16} fill="currentColor" /> 찜 해제</button></div>
+        </article>
+      ) : (
+        <ListingCard key={listing.publicId} listing={{ ...listing, title: listing.title ?? '', price: listing.price ?? 0 }}>
           <div className="mp-card-actions"><button type="button" className="button mp-heart-button" aria-pressed="true"
             disabled={removing.includes(listing.publicId)} aria-label={listing.title + ' 찜 해제'}
             onClick={() => void remove(listing.publicId)}><Heart size={16} fill="currentColor" /> 찜 해제</button></div>

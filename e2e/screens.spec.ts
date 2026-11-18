@@ -175,3 +175,30 @@ test('로그인하지 않고 신고하기를 누르면 로그인 화면으로 �
   await page.getByRole('button', { name: '이 매물 신고하기' }).click()
   await expect(page).toHaveURL(/\/login$/)
 })
+
+test('찜한 매물이 제재·삭제되면 제목과 가격 대신 볼 수 없는 매물로 보여 주고, 찜은 해제할 수 있다', async ({ page }) => {
+  const ref = (publicId: string, title: string | null, status: string) => ({ listing: { publicId, title, price: title ? 950000 : null, status }, notifyBasePrice: 950000, favoritedAt: '2026-11-18T00:00:00Z' })
+  let removed = ''
+  await page.route('**/api/users/me/favorites*', (route) => route.fulfill({ json: { success: true, data: { hasNext: false, nextCursor: null, items: [
+    ref('01JLISTING0000000000000011', '판매 중인 헤드폰', 'ACTIVE'),
+    ref('01JLISTING0000000000000012', '제재된 아이폰', 'BLOCKED'),
+    ref('01JLISTING0000000000000013', null, 'DELETED'),
+  ] } } }))
+  await page.route('**/api/listings/*/favorite', (route) => { removed = route.request().url(); return route.fulfill({ json: { success: true, data: { favorited: false } } }) })
+
+  await page.goto('/login')
+  await page.getByLabel('이메일').fill('buyer@example.test')
+  await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.evaluate(() => { window.history.pushState({}, '', '/favorites'); window.dispatchEvent(new PopStateEvent('popstate')) })
+
+  await expect(page.getByText('판매 중인 헤드폰')).toBeVisible()
+  await expect(page.getByText('제재된 아이폰')).toHaveCount(0)
+  await expect(page.getByText(/거래 불가/)).toHaveCount(0)
+  await expect(page.getByText('더 이상 볼 수 없는 매물')).toHaveCount(2)
+
+  await page.getByRole('button', { name: '볼 수 없는 매물 찜 해제' }).first().click()
+  await expect(page.getByText('더 이상 볼 수 없는 매물')).toHaveCount(1)
+  expect(removed).toContain('01JLISTING0000000000000012')
+})
