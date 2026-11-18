@@ -400,3 +400,16 @@ test('verifying email while the first profile read is still pending reloads the 
   await restoring;
   assert.equal(session.getSnapshot().account?.emailVerified, true);
 });
+
+test('a 403 on the profile that is not a suspension keeps the session and offers a retry', async () => {
+  const session = await freshSession();
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/reissue') return json({ accessToken: 'restored-token', expiresIn: 1800 });
+    return failure(403, 'C006');
+  });
+
+  await session.restore();
+  assert.equal(session.getSnapshot().authenticated, true);
+  assert.equal(session.getSnapshot().restricted, false);
+  assert.equal(session.getSnapshot().profileError, true);
+});

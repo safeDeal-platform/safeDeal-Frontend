@@ -299,8 +299,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
  * 지금 세션의 내 정보를 불러와 계정에 합친다. 새로고침 뒤에는 재발급 응답에 계정이 없어서 이것으로 채운다.
  * - 응답이 오기 전에 로그아웃·다른 계정 로그인이 끼면 그 응답은 버린다(sessionVersion·토큰 비교).
  * - 401은 request()가 재발급까지 해 보고도 안 된 것이라 세션을 끝낸다(탈퇴 직후 남은 토큰, AUTH004).
- * - 403은 정지 계정(AUTH005): 세션을 끝내고 로그인 화면에 이유를 남긴다.
- * - 그 밖의 실패(네트워크·5xx)는 로그인을 유지하고 profileError만 켠다.
+ * - 403 + AUTH005(정지 계정): 세션을 끝내고 로그인 화면에 이유를 남긴다(reissue와 같은 기준).
+ * - 그 밖의 실패(다른 403, 네트워크·5xx)는 로그인을 유지하고 profileError만 켠다.
  */
 async function loadProfile(): Promise<void> {
   const version = sessionVersion;
@@ -314,9 +314,10 @@ async function loadProfile(): Promise<void> {
     publishSession(accessToken, { ...authState.account, ...me });
   } catch (error) {
     if (stale()) return;
-    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    const suspended = error instanceof ApiError && error.status === 403 && error.code === 'AUTH005';
+    if (suspended || (error instanceof ApiError && error.status === 401)) {
       sessionVersion++;
-      publishSession(null, null, { restricted: error.status === 403 });
+      publishSession(null, null, { restricted: suspended });
       return;
     }
     publishSession(accessToken, authState.account, { profileError: true });
