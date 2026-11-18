@@ -215,3 +215,27 @@ test('정지된 계정으로 확인되면 로그인 상태를 끝내고 이유�
   await expect(page.getByRole('alert').filter({ hasText: '이용이 제한된 계정이라 로그인 상태를 끝냈어요.' })).toBeVisible()
   await expect(page.getByRole('link', { name: '로그인' })).toBeVisible()
 })
+
+test('이메일 인증 직후 내 정보를 다시 못 읽어도 다시 불러오기로 인증 상태를 확인할 수 있다', async ({ page }) => {
+  let online = false
+  await page.route('**/api/auth/login', (route) => route.fulfill({ json: { success: true, data: { ...me, emailVerified: false } } }))
+  await page.route('**/api/auth/email/verify', (route) => route.fulfill({ json: { success: true } }))
+  await page.route((url) => url.pathname === '/api/users/me', (route) => online
+    ? route.fulfill({ json: { success: true, data: profile } })
+    : route.fulfill({ status: 503, json: { success: false, error: { code: 'C500', message: '잠시 후 다시 시도해 주세요.' } } }))
+
+  await page.goto('/login')
+  await page.getByLabel('이메일').fill('seller@example.test')
+  await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.evaluate(() => { window.history.pushState({}, '', '/email/verify?token=mail-token'); window.dispatchEvent(new PopStateEvent('popstate')) })
+  await page.getByRole('button', { name: '이메일 인증 완료' }).click()
+  await expect(page.getByText('이메일 인증을 완료했습니다.')).toBeVisible()
+
+  online = true
+  await page.getByRole('button', { name: '다시 불러오기' }).click()
+  await page.evaluate(() => { window.history.pushState({}, '', '/account'); window.dispatchEvent(new PopStateEvent('popstate')) })
+  await expect(page.getByText(/이메일 인증 완료/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '다시 불러오기' })).toHaveCount(0)
+})

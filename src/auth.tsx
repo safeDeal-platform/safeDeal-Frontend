@@ -37,6 +37,22 @@ export function useAuth() {
   return value;
 }
 
+/** 내 정보(/me)를 읽는 중이면 안내, 읽기에 실패했으면 '다시 불러오기'. 계정이 이미 있어도 실패면 버튼을 보여 준다. */
+export function ProfileLoadState() {
+  const { profileError } = useAuth();
+  const [busy, setBusy] = useState(false);
+  if (!profileError) return <p className="muted" role="status">내 정보를 불러오고 있어요.</p>;
+  return (
+    <p className="muted" role="alert">
+      내 정보를 불러오지 못했어요.{' '}
+      <button type="button" className="button" disabled={busy} onClick={() => {
+        setBusy(true);
+        void authSession.reloadProfile().finally(() => setBusy(false));
+      }}>{busy ? '불러오는 중' : '다시 불러오기'}</button>
+    </p>
+  );
+}
+
 const titles: Record<AuthPageKind, string> = {
   login: '로그인',
   signup: '회원가입',
@@ -77,7 +93,7 @@ export function AuthPage({ kind }: { kind: AuthPageKind }) {
 }
 
 function AuthScreen({ kind }: { kind: AuthPageKind }) {
-  const { authenticated, account, restricted } = useAuth();
+  const { authenticated, account, restricted, profileError } = useAuth();
   const [search] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -188,7 +204,9 @@ function AuthScreen({ kind }: { kind: AuthPageKind }) {
         <p className="error" role="alert">이용이 제한된 계정이라 로그인 상태를 끝냈어요. 자세한 내용은 고객센터로 문의해 주세요.</p>
       )}
       {kind === 'verify' && authenticated && (account === null || account.emailVerified === null) && (
-        <p className="muted" role="status">로그인한 계정의 인증 상태를 확인하고 있어요.</p>
+        profileError
+          ? <ProfileLoadState />
+          : <p className="muted" role="status">로그인한 계정의 인증 상태를 확인하고 있어요.</p>
       )}
       {showsForm && (
         <form className="stack" onSubmit={(event) => void submit(event)}>

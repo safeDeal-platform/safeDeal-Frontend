@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, ChartNoAxesCombined, Headphones, MessageCircle, Plus, ShoppingCart, Siren } from 'lucide-react'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
-import { api, authSession, type NotificationItem, type PriceStatistics } from './api'
-import { useAuth } from './auth'
+import { api, type NotificationItem, type PriceStatistics } from './api'
+import { ProfileLoadState, useAuth } from './auth'
 import './services.css'
 
 type Loader<T> = (signal: AbortSignal) => Promise<T>
@@ -225,20 +225,6 @@ const accountTabs = [
 
 const joined = new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', timeZone: 'Asia/Seoul' })
 
-/** 로그인은 됐는데 내 정보(/me)가 아직 없을 때: 불러오는 중이거나, 실패했으면 다시 불러오기. */
-function ProfileLoadState() {
-  const auth = useAuth()
-  const [busy, setBusy] = useState(false)
-  if (!auth.profileError) return <p className="muted" role="status">내 정보를 불러오고 있어요.</p>
-  return <p className="muted" role="alert">
-    내 정보를 불러오지 못했어요.{' '}
-    <button type="button" className="button" disabled={busy} onClick={() => {
-      setBusy(true)
-      void authSession.reloadProfile().finally(() => setBusy(false))
-    }}>{busy ? '불러오는 중' : '다시 불러오기'}</button>
-  </p>
-}
-
 export function AccountPage() {
   const auth = useAuth()
   const location = useLocation()
@@ -264,6 +250,8 @@ export function AccountPage() {
               account.createdAt && `${joined.format(new Date(account.createdAt))} 가입`,
             ].filter(Boolean).join(' · ')}</p>
           ) : <ProfileLoadState />}
+          {/* 계정은 있는데 다시 읽기만 실패한 경우(예: 이메일 인증 직후)에도 재시도할 수 있어야 한다. */}
+          {account && auth.profileError && <ProfileLoadState />}
         </div>
         {account && <dl className="service-account-stats">
           <div><dt>신뢰도</dt><dd>{account.trustScore.toFixed(1)}<span className="muted"> / 100</span></dd></div>
