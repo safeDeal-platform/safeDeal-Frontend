@@ -137,26 +137,65 @@ export class ApiError extends Error {
   }
 }
 
+/** GET /api/users/me. 본인 조회라 이메일 원문이 온다. 역할(role)은 이 응답에 없다. */
+export interface MyProfile {
+  publicId: string;
+  email: string;
+  nickname: string;
+  emailVerified: boolean;
+  trustScore: number;
+  createdAt: string;
+}
+
+/** 로그인 응답과 /me 응답을 합친 계정. 어느 쪽에서 왔는지에 따라 빠지는 필드가 있다. */
+export interface Account {
+  publicId: string;
+  nickname: string;
+  trustScore: number;
+  /** null = 확인하지 못함(다른 계정의 인증 링크를 연 직후 등) */
+  emailVerified: boolean | null;
+  role?: string;
+  email?: string;
+  createdAt?: string;
+}
+
 interface AuthState {
   authenticated: boolean;
   ready: boolean;
-  account: (Omit<AuthResponse, 'emailVerified'> & { emailVerified: boolean | null }) | null;
+  account: Account | null;
   sessionKey: number;
+  /** 로그인은 됐는데 /me를 불러오지 못함(네트워크·서버 오류). 다시 불러오기를 보여 준다. */
+  profileError: boolean;
+  /** /me가 정지 계정(403)이라 세션을 끝냈음. 다음 로그인 시도 전까지 로그인 화면에 이유를 보여 준다. */
+  restricted: boolean;
 }
 
-let authState: AuthState = { authenticated: false, ready: false, account: null, sessionKey: 0 };
+let authState: AuthState = {
+  authenticated: false, ready: false, account: null, sessionKey: 0, profileError: false, restricted: false,
+};
 let accessToken: string | null = null;
 let sessionVersion = 0;
 let pendingReissue: Promise<string | null> | null = null;
 let sessionWork: Promise<unknown> = Promise.resolve();
 // True while the last restore attempt ended on a network or server failure rather than an auth answer.
 let restoreUnresolved = false;
+// 내 정보 조회 순번. 늦게 도착한 옛 응답이 최신 응답을 덮지 않게 한다.
+let profileTicket = 0;
 const RESTORE_RETRY_DELAYS_MS = [500, 1500];
 const authListeners = new Set<() => void>();
 
-function publishSession(token: string | null, account: AuthState['account']) {
+function publishSession(
+  token: string | null,
+  account: Account | null,
+  flags: { profileError?: boolean; restricted?: boolean } = {},
+) {
   accessToken = token;
-  authState = { authenticated: Boolean(token), ready: true, account, sessionKey: sessionVersion };
+  authState = {
+    authenticated: Boolean(token), ready: true, account, sessionKey: sessionVersion,
+    profileError: flags.profileError ?? false,
+    // 정지 안내는 다음 로그인 시도까지 남긴다. 세션이 다시 생기면 지운다.
+    restricted: token ? false : (flags.restricted ?? authState.restricted),
+  };
   authListeners.forEach((listener) => listener());
 }
 
@@ -215,6 +254,8 @@ function reissue(): Promise<string | null> {
     if (version !== sessionVersion) return null;
     try {
       const token = await send<TokenResponse>('/api/auth/reissue', json('POST'), null);
+      // 기다리는 사이 /me가 세션을 끝냈을 수 있다(정지·탈퇴). 끝난 세션의 토큰은 되살리지 않는다.
+      if (version !== sessionVersion) return null;
       const previousSubject = tokenSubject(accessToken);
       const renewedSubject = tokenSubject(token.accessToken);
       if (previousSubject !== undefined && renewedSubject !== undefined && previousSubject !== renewedSubject) {
@@ -222,12 +263,16 @@ function reissue(): Promise<string | null> {
         publishSession(null, null);
         return null;
       }
-      publishSession(token.accessToken, authState.account ? { ...authState.account, ...token } : null);
+      // 같은 세션의 토큰만 바뀐 것이라, 내 정보 조회 실패 표시(재시도 버튼)는 그대로 둔다.
+      publishSession(token.accessToken, authState.account ? { ...authState.account, ...token } : null,
+        { profileError: authState.profileError });
       return token.accessToken;
     } catch (error) {
       if (!(error instanceof ApiError) || (error.status !== 401 && error.status !== 403)) throw error;
+      if (version !== sessionVersion) return null;
       sessionVersion++;
-      publishSession(null, null);
+      // 정지 계정(AUTH005)이면 로그인 화면에 이유를 남긴다. 그 밖의 401·403은 조용히 끝낸다.
+      publishSession(null, null, { restricted: error.code === 'AUTH005' });
       return null;
     }
   }).finally(() => { pendingReissue = null; });
@@ -247,6 +292,35 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     if (!refreshed || version !== sessionVersion) throw error;
     options.signal?.throwIfAborted();
     return send<T>(path, options, refreshed);
+  }
+}
+
+/**
+ * 지금 세션의 내 정보를 불러와 계정에 합친다. 새로고침 뒤에는 재발급 응답에 계정이 없어서 이것으로 채운다.
+ * - 응답이 오기 전에 로그아웃·다른 계정 로그인이 끼면 그 응답은 버린다(sessionVersion·토큰 비교).
+ * - 401은 request()가 재발급까지 해 보고도 안 된 것이라 세션을 끝낸다(탈퇴 직후 남은 토큰, AUTH004).
+ * - 403 + AUTH005(정지 계정): 세션을 끝내고 로그인 화면에 이유를 남긴다(reissue와 같은 기준).
+ * - 그 밖의 실패(다른 403, 네트워크·5xx)는 로그인을 유지하고 profileError만 켠다.
+ */
+async function loadProfile(): Promise<void> {
+  const version = sessionVersion;
+  // 조회가 겹치면(복구와 포커스 복구, 인증 직후 재조회) 마지막에 보낸 요청의 답만 반영한다.
+  const ticket = ++profileTicket;
+  const stale = () => version !== sessionVersion || ticket !== profileTicket || !accessToken;
+  if (!accessToken) return;
+  try {
+    const me = await request<MyProfile>('/api/users/me');
+    if (stale()) return;
+    publishSession(accessToken, { ...authState.account, ...me });
+  } catch (error) {
+    if (stale()) return;
+    const suspended = error instanceof ApiError && error.status === 403 && error.code === 'AUTH005';
+    if (suspended || (error instanceof ApiError && error.status === 401)) {
+      sessionVersion++;
+      publishSession(null, null, { restricted: suspended });
+      return;
+    }
+    publishSession(accessToken, authState.account, { profileError: true });
   }
 }
 
@@ -277,6 +351,8 @@ export const authSession = {
         try {
           await reissue();
           restoreUnresolved = false;
+          // 재발급 응답에는 계정이 없다. 새로고침 직후(account 없음)에만 /me로 채운다.
+          if (accessToken && !authState.account) await loadProfile();
           return;
         } catch (error) {
           if (attempt >= RESTORE_RETRY_DELAYS_MS.length) {
@@ -314,10 +390,17 @@ export const authSession = {
     const version = sessionVersion;
     await send<void>('/api/auth/email/verify', json('POST', { token }), null);
     // A public token can verify a different account than the one signed in here.
-    if (version === sessionVersion && authState.account?.emailVerified === false) {
-      publishSession(accessToken, { ...authState.account, emailVerified: null });
+    if (version === sessionVersion && accessToken) {
+      if (authState.account?.emailVerified === false) {
+        publishSession(accessToken, { ...authState.account, emailVerified: null });
+      }
+      // 어느 계정이 인증됐는지는 서버만 안다. 계정을 아직 못 읽었어도 다시 읽고,
+      // 인증 전에 보낸 조회의 답은 순번으로 버린다.
+      await loadProfile();
     }
   },
+  /** 마이페이지의 '다시 불러오기'. 로그인 상태가 아니면 아무것도 하지 않는다. */
+  reloadProfile: () => loadProfile(),
   resend: () => request<void>('/api/auth/email/verify/resend', json('POST')),
   requestReset: (email: string) =>
     send<void>('/api/auth/password/reset-request', json('POST', { email }), null),
