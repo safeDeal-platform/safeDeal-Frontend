@@ -182,7 +182,7 @@ test('찜한 매물이 제재·삭제되면 제목과 가격 대신 볼 수 없�
   await page.route('**/api/users/me/favorites*', (route) => route.fulfill({ json: { success: true, data: { hasNext: false, nextCursor: null, items: [
     ref('01JLISTING0000000000000011', '판매 중인 헤드폰', 950000, 'ACTIVE'),
     ref('01JLISTING0000000000000012', '제재된 아이폰', 111000, 'BLOCKED'),
-    ref('01JLISTING0000000000000013', null, null, 'DELETED'),
+    ref('01JLISTING0000000000000013', '삭제된 노트북', 333000, 'DELETED'),
     // 상태와 상관없이 제목·가격이 비어 오면 가리는 분기를 따로 확인한다(백엔드가 비워 보내는 경우).
     ref('01JLISTING0000000000000014', null, 222000, 'ACTIVE'),
     ref('01JLISTING0000000000000015', '가격 빠진 매물', null, 'ACTIVE'),
@@ -201,7 +201,7 @@ test('찜한 매물이 제재·삭제되면 제목과 가격 대신 볼 수 없�
   const hidden = page.getByRole('article').filter({ hasText: '더 이상 볼 수 없는 매물' })
   await expect(hidden).toHaveCount(4)
   // 가린 카드에는 원래 제목·가격·낙인 문구·상세 링크가 없고, 찜 해제 버튼만 있다.
-  for (const leaked of ['제재된 아이폰', '가격 빠진 매물', '111,000원', '222,000원', '거래 불가']) {
+  for (const leaked of ['제재된 아이폰', '삭제된 노트북', '가격 빠진 매물', '111,000원', '222,000원', '333,000원', '거래 불가']) {
     await expect(page.getByText(leaked)).toHaveCount(0)
   }
   await expect(hidden.getByRole('link')).toHaveCount(0)
