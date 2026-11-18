@@ -87,6 +87,11 @@ test('verifying a public email token leaves the signed-in account verification s
   }
 });
 
+async function freshModule() {
+  vi.resetModules();
+  return import('../src/api');
+}
+
 async function freshSession() {
   vi.resetModules();
   return (await import('../src/api')).authSession;
@@ -301,5 +306,97 @@ test('verifying the signed-in account email reloads the profile instead of leavi
 
   await session.login('seller@example.test', 'safe-pass');
   await session.verify('mail-token');
+  assert.equal(session.getSnapshot().account?.emailVerified, true);
+});
+
+const loginAccount = { ...signedInProfile, role: 'USER', accessToken: 'signed-in-token', expiresIn: 1800 };
+const deferred = () => { let resolve: (r: Response) => void = () => {}; const promise = new Promise<Response>((r) => { resolve = r; }); return { promise, resolve }; };
+const failure = (status: number, code: string) => Response.json({ success: false, error: { code, message: code } }, { status });
+
+test('a token reissue that finishes after the session ended does not bring the session back', async () => {
+  const { authSession: session, request: freshRequest } = await freshModule();
+  const reissue = deferred();
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/login') return json(loginAccount);
+    if (url === '/api/auth/reissue') return reissue.promise;
+    if (url === '/api/users/me') return failure(403, 'AUTH005');
+    return failure(401, 'AUTH001');
+  });
+
+  await session.login('seller@example.test', 'safe-pass');
+  const pending = freshRequest('/api/notifications').catch(() => undefined);
+  await vi.waitFor(() => assert.ok(vi.mocked(fetch).mock.calls.some(([u]) => u === '/api/auth/reissue')));
+  await session.reloadProfile();
+  reissue.resolve(json({ accessToken: 'late-token', expiresIn: 1800 }));
+  await pending;
+  assert.equal(session.getSnapshot().authenticated, false);
+  assert.equal(session.getSnapshot().restricted, true);
+});
+
+test('a reissue refused for a suspended account records why the session ended', async () => {
+  const { authSession: session, request: freshRequest } = await freshModule();
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/login') return json(loginAccount);
+    if (url === '/api/auth/reissue') return failure(403, 'AUTH005');
+    return failure(401, 'AUTH001');
+  });
+
+  await session.login('seller@example.test', 'safe-pass');
+  await assert.rejects(freshRequest('/api/notifications'), { status: 401 });
+  assert.equal(session.getSnapshot().authenticated, false);
+  assert.equal(session.getSnapshot().restricted, true);
+});
+
+test('a token reissue keeps the profile error so the retry button stays', async () => {
+  const { authSession: session, request: freshRequest } = await freshModule();
+  let reissued = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    if (url === '/api/auth/reissue') return json({ accessToken: `token-${++reissued}`, expiresIn: 1800 });
+    if (url === '/api/users/me') return failure(503, 'C500');
+    const token = new Headers(init?.headers).get('Authorization');
+    return token === 'Bearer token-1' ? failure(401, 'AUTH001') : json([]);
+  });
+
+  await session.restore();
+  assert.equal(session.getSnapshot().profileError, true);
+  await freshRequest('/api/notifications');
+  assert.equal(reissued, 2);
+  assert.equal(session.getSnapshot().profileError, true);
+});
+
+test('only the latest profile answer is kept when two profile reads overlap', async () => {
+  const session = await freshSession();
+  const first = deferred();
+  let reads = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/login') return json({ ...loginAccount, emailVerified: false });
+    if (url === '/api/users/me') return ++reads === 1 ? first.promise : json({ ...signedInProfile, emailVerified: true });
+    return json(undefined);
+  });
+
+  await session.login('seller@example.test', 'safe-pass');
+  const older = session.reloadProfile();
+  await session.reloadProfile();
+  first.resolve(json({ ...signedInProfile, emailVerified: false }));
+  await older;
+  assert.equal(session.getSnapshot().account?.emailVerified, true);
+});
+
+test('verifying email while the first profile read is still pending reloads the profile anyway', async () => {
+  const session = await freshSession();
+  const first = deferred();
+  let reads = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/auth/reissue') return json({ accessToken: 'restored-token', expiresIn: 1800 });
+    if (url === '/api/auth/email/verify') return json(undefined);
+    if (url === '/api/users/me') return ++reads === 1 ? first.promise : json({ ...signedInProfile, emailVerified: true });
+    return json(undefined);
+  });
+
+  const restoring = session.restore();
+  await vi.waitFor(() => assert.equal(reads, 1));
+  await session.verify('mail-token');
+  first.resolve(json({ ...signedInProfile, emailVerified: false }));
+  await restoring;
   assert.equal(session.getSnapshot().account?.emailVerified, true);
 });

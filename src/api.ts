@@ -179,6 +179,8 @@ let pendingReissue: Promise<string | null> | null = null;
 let sessionWork: Promise<unknown> = Promise.resolve();
 // True while the last restore attempt ended on a network or server failure rather than an auth answer.
 let restoreUnresolved = false;
+// 내 정보 조회 순번. 늦게 도착한 옛 응답이 최신 응답을 덮지 않게 한다.
+let profileTicket = 0;
 const RESTORE_RETRY_DELAYS_MS = [500, 1500];
 const authListeners = new Set<() => void>();
 
@@ -252,6 +254,8 @@ function reissue(): Promise<string | null> {
     if (version !== sessionVersion) return null;
     try {
       const token = await send<TokenResponse>('/api/auth/reissue', json('POST'), null);
+      // 기다리는 사이 /me가 세션을 끝냈을 수 있다(정지·탈퇴). 끝난 세션의 토큰은 되살리지 않는다.
+      if (version !== sessionVersion) return null;
       const previousSubject = tokenSubject(accessToken);
       const renewedSubject = tokenSubject(token.accessToken);
       if (previousSubject !== undefined && renewedSubject !== undefined && previousSubject !== renewedSubject) {
@@ -259,12 +263,16 @@ function reissue(): Promise<string | null> {
         publishSession(null, null);
         return null;
       }
-      publishSession(token.accessToken, authState.account ? { ...authState.account, ...token } : null);
+      // 같은 세션의 토큰만 바뀐 것이라, 내 정보 조회 실패 표시(재시도 버튼)는 그대로 둔다.
+      publishSession(token.accessToken, authState.account ? { ...authState.account, ...token } : null,
+        { profileError: authState.profileError });
       return token.accessToken;
     } catch (error) {
       if (!(error instanceof ApiError) || (error.status !== 401 && error.status !== 403)) throw error;
+      if (version !== sessionVersion) return null;
       sessionVersion++;
-      publishSession(null, null);
+      // 정지 계정(AUTH005)이면 로그인 화면에 이유를 남긴다. 그 밖의 401·403은 조용히 끝낸다.
+      publishSession(null, null, { restricted: error.code === 'AUTH005' });
       return null;
     }
   }).finally(() => { pendingReissue = null; });
@@ -296,13 +304,16 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
  */
 async function loadProfile(): Promise<void> {
   const version = sessionVersion;
+  // 조회가 겹치면(복구와 포커스 복구, 인증 직후 재조회) 마지막에 보낸 요청의 답만 반영한다.
+  const ticket = ++profileTicket;
+  const stale = () => version !== sessionVersion || ticket !== profileTicket || !accessToken;
   if (!accessToken) return;
   try {
     const me = await request<MyProfile>('/api/users/me');
-    if (version !== sessionVersion || !accessToken) return;
+    if (stale()) return;
     publishSession(accessToken, { ...authState.account, ...me });
   } catch (error) {
-    if (version !== sessionVersion || !accessToken) return;
+    if (stale()) return;
     if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
       sessionVersion++;
       publishSession(null, null, { restricted: error.status === 403 });
@@ -378,9 +389,12 @@ export const authSession = {
     const version = sessionVersion;
     await send<void>('/api/auth/email/verify', json('POST', { token }), null);
     // A public token can verify a different account than the one signed in here.
-    if (version === sessionVersion && authState.account?.emailVerified === false) {
-      publishSession(accessToken, { ...authState.account, emailVerified: null });
-      // 어느 계정이 인증됐는지는 서버만 안다. 내 정보를 다시 읽어 실제 값으로 바꾼다.
+    if (version === sessionVersion && accessToken) {
+      if (authState.account?.emailVerified === false) {
+        publishSession(accessToken, { ...authState.account, emailVerified: null });
+      }
+      // 어느 계정이 인증됐는지는 서버만 안다. 계정을 아직 못 읽었어도 다시 읽고,
+      // 인증 전에 보낸 조회의 답은 순번으로 버린다.
       await loadProfile();
     }
   },
