@@ -177,12 +177,15 @@ test('로그인하지 않고 신고하기를 누르면 로그인 화면으로 �
 })
 
 test('찜한 매물이 제재·삭제되면 제목과 가격 대신 볼 수 없는 매물로 보여 주고, 찜은 해제할 수 있다', async ({ page }) => {
-  const ref = (publicId: string, title: string | null, status: string) => ({ listing: { publicId, title, price: title ? 950000 : null, status }, notifyBasePrice: 950000, favoritedAt: '2026-11-18T00:00:00Z' })
+  const ref = (publicId: string, title: string | null, price: number | null, status: string) => ({ listing: { publicId, title, price, status }, notifyBasePrice: 1, favoritedAt: '2026-11-18T00:00:00Z' })
   let removed = ''
   await page.route('**/api/users/me/favorites*', (route) => route.fulfill({ json: { success: true, data: { hasNext: false, nextCursor: null, items: [
-    ref('01JLISTING0000000000000011', '판매 중인 헤드폰', 'ACTIVE'),
-    ref('01JLISTING0000000000000012', '제재된 아이폰', 'BLOCKED'),
-    ref('01JLISTING0000000000000013', null, 'DELETED'),
+    ref('01JLISTING0000000000000011', '판매 중인 헤드폰', 950000, 'ACTIVE'),
+    ref('01JLISTING0000000000000012', '제재된 아이폰', 111000, 'BLOCKED'),
+    ref('01JLISTING0000000000000013', null, null, 'DELETED'),
+    // 상태와 상관없이 제목·가격이 비어 오면 가리는 분기를 따로 확인한다(백엔드가 비워 보내는 경우).
+    ref('01JLISTING0000000000000014', null, 222000, 'ACTIVE'),
+    ref('01JLISTING0000000000000015', '가격 빠진 매물', null, 'ACTIVE'),
   ] } } }))
   await page.route('**/api/listings/*/favorite', (route) => { removed = route.request().url(); return route.fulfill({ json: { success: true, data: { favorited: false } } }) })
 
@@ -194,11 +197,17 @@ test('찜한 매물이 제재·삭제되면 제목과 가격 대신 볼 수 없�
   await page.evaluate(() => { window.history.pushState({}, '', '/favorites'); window.dispatchEvent(new PopStateEvent('popstate')) })
 
   await expect(page.getByText('판매 중인 헤드폰')).toBeVisible()
-  await expect(page.getByText('제재된 아이폰')).toHaveCount(0)
-  await expect(page.getByText(/거래 불가/)).toHaveCount(0)
-  await expect(page.getByText('더 이상 볼 수 없는 매물')).toHaveCount(2)
+  await expect(page.getByText('950,000원')).toBeVisible()
+  const hidden = page.getByRole('article').filter({ hasText: '더 이상 볼 수 없는 매물' })
+  await expect(hidden).toHaveCount(4)
+  // 가린 카드에는 원래 제목·가격·낙인 문구·상세 링크가 없고, 찜 해제 버튼만 있다.
+  for (const leaked of ['제재된 아이폰', '가격 빠진 매물', '111,000원', '222,000원', '거래 불가']) {
+    await expect(page.getByText(leaked)).toHaveCount(0)
+  }
+  await expect(hidden.getByRole('link')).toHaveCount(0)
+  await expect(hidden.getByRole('button', { name: '볼 수 없는 매물 찜 해제' })).toHaveCount(4)
 
-  await page.getByRole('button', { name: '볼 수 없는 매물 찜 해제' }).first().click()
-  await expect(page.getByText('더 이상 볼 수 없는 매물')).toHaveCount(1)
+  await hidden.first().getByRole('button', { name: '볼 수 없는 매물 찜 해제' }).click()
+  await expect(hidden).toHaveCount(3)
   expect(removed).toContain('01JLISTING0000000000000012')
 })
