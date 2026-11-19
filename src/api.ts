@@ -26,6 +26,12 @@ interface ListingRef {
   status: ListingStatus;
 }
 
+/** 찜 목록의 매물. 제재·삭제 매물이면 백엔드가 제목·가격을 비워 보낼 수 있다(요청 중). 프런트는 값이 와도 보여 주지 않는다. */
+interface FavoriteListingRef extends Omit<ListingRef, 'title' | 'price'> {
+  title: string | null;
+  price: number | null;
+}
+
 // Fields marked "requested" are in the API spec but not yet returned by the backend.
 // Screens render them only when the server sends them and never fill them in.
 export interface ListingSummary extends ListingRef {
@@ -74,7 +80,7 @@ export interface CursorPage<T> {
 }
 
 export interface FavoriteSummary {
-  listing: ListingRef;
+  listing: FavoriteListingRef;
   notifyBasePrice: number;
   favoritedAt: string;
 }
