@@ -5,7 +5,7 @@ import {
   ArrowRight, Camera, Headphones, Heart, ImagePlus, Laptop, MapPin, MessageCircle, Package,
   ShieldCheck, Shirt, Sofa, Tent, TrendingUp, Watch, X,
 } from 'lucide-react'
-import { api } from './api'
+import { api, authSession } from './api'
 import type { Category, ListingSummary, ListingDetail, FavoriteSummary } from './api'
 import { useAuth } from './auth'
 import { badgeFor, badges } from './badge'
@@ -557,6 +557,9 @@ function ListingRequest({ id }: { id: string }) {
   }}>다시 시도</button></div>
   if (!listing) return <p className="mp-state" role="status">매물 정보를 불러오는 중입니다.</p>
   return <ListingDetailContent key={session} listing={listing} onChange={(next) => {
+    // A sold/delete request from an ended session can finish after the new session's detail
+    // arrived; applying it would hide that detail (session mismatch) with nothing left to refetch.
+    if (authSession.getSnapshot().sessionKey !== session) return
     if (next) setLoaded({ listing: next, session })
     else navigate('/account?tab=selling', { replace: true, state: { deleted: listing.title } })
   }} />
