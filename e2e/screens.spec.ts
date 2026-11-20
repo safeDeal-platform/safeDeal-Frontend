@@ -157,6 +157,46 @@ test('로그인했는데 서버가 favorited를 null로 주면 찜 목록에서 
   expect(favoritesRead).toBe(true)
 })
 
+test('상세를 연 채 세션이 다른 계정으로 바뀌면 이전 계정 기준의 찜 정보를 버리고 상세를 다시 불러온다', async ({ page }) => {
+  // 토큰은 sub만 비교하므로 서명 없는 JWT 모양이면 충분하다.
+  const jwt = (sub: string) => 'e30.' + Buffer.from(JSON.stringify({ sub })).toString('base64url') + '.sig'
+  const first = jwt('01JBUYERA0000000000000001')
+  const detailCalls: (string | undefined)[] = []
+  let signedIn = false
+  await page.route('**/api/auth/login', (route) => { signedIn = true; return route.fulfill({ json: { success: true, data: { ...me, publicId: '01JBUYERA0000000000000001', accessToken: first } } }) })
+  await page.route('**/api/listings/' + detail.publicId, (route) => {
+    const authorization = route.request().headers().authorization
+    detailCalls.push(authorization)
+    return route.fulfill({ json: { success: true, data: {
+      ...detail, seller: { publicId: '01JOTHER000000000000000001', nickname: '다른사람', trustScore: 72.5 },
+      favorited: authorization ? true : null,
+    } } })
+  })
+  // 찜 해제 요청이 401을 받고, 재발급이 다른 계정(B)의 토큰을 돌려주면 앱은 A의 세션을 끝낸다.
+  await page.route('**/api/listings/' + detail.publicId + '/favorite', (route) => route.fulfill({ status: 401, json: { success: false, error: { code: 'C005', message: '로그인이 필요합니다.' } } }))
+  // 처음 화면을 열 때의 세션 복구는 쿠키가 없어 실패하고, 로그인한 뒤의 재발급만 B의 토큰을 준다.
+  await page.route('**/api/auth/reissue', (route) => signedIn
+    ? route.fulfill({ json: { success: true, data: { accessToken: jwt('01JBUYERB0000000000000002'), expiresIn: 900 } } })
+    : route.fulfill({ status: 401, json: { success: false, error: { code: 'AUTH003', message: '다시 로그인해 주세요.' } } }))
+  await page.goto('/login')
+  await page.getByLabel('이메일').fill('buyer@example.test')
+  await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.evaluate((id) => { window.history.pushState({}, '', '/listings/' + id); window.dispatchEvent(new PopStateEvent('popstate')) }, detail.publicId)
+
+  await expect(page.getByRole('button', { name: /찜 해제/ })).toHaveAttribute('aria-pressed', 'true')
+  expect(detailCalls).toEqual(['Bearer ' + first])
+  await page.getByRole('button', { name: /찜 해제/ }).click()
+
+  await expect(page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '로그인' })).toBeVisible()
+  // A의 세션으로 받은 상세(favorited: true)를 그대로 쓰지 않고, 바뀐 세션으로 다시 받는다.
+  await expect.poll(() => detailCalls.length).toBe(2)
+  expect(detailCalls[1]).toBeUndefined()
+  await expect(page.getByRole('heading', { name: detail.title })).toBeVisible()
+  await expect(page.getByRole('button', { name: /찜하기/ })).toHaveAttribute('aria-pressed', 'false')
+})
+
 test('다른 사람의 매물을 사유와 함께 신고하고, 서버가 거절하면 이유를 안내하고, 접수한 신고는 취소할 수 있다', async ({ page }) => {
   const bodies: unknown[] = []
   let cancelled = ''

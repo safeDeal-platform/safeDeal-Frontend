@@ -532,27 +532,32 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
 function ListingRequest({ id }: { id: string }) {
   const auth = useAuth()
   const navigate = useNavigate()
-  const [listing, setListing] = useState<ListingDetail | null>(null)
+  // favorited and favoriteCount belong to the viewer the detail was fetched for, so a detail
+  // loaded under another session (logout, a different account) is never shown and is fetched again.
+  const [loaded, setLoaded] = useState<{ listing: ListingDetail; session: number } | null>(null)
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
+  const session = auth.sessionKey
+  const listing = loaded?.session === session ? loaded.listing : null
 
   useEffect(() => {
     const controller = new AbortController()
+    setError('')
     api.listing(id, controller.signal).then((data) => {
-      if (!controller.signal.aborted) setListing(data)
+      if (!controller.signal.aborted) setLoaded({ listing: data, session })
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(errorMessage(cause))
     })
     return () => controller.abort()
-  }, [id, revision])
+  }, [id, revision, session])
 
   if (error) return <div className="mp-state" role="alert"><p>{error}</p><button className="button" onClick={() => {
     setError('')
     setRevision((value) => value + 1)
   }}>다시 시도</button></div>
   if (!listing) return <p className="mp-state" role="status">매물 정보를 불러오는 중입니다.</p>
-  return <ListingDetailContent key={auth.sessionKey} listing={listing} onChange={(next) => {
-    if (next) setListing(next)
+  return <ListingDetailContent key={session} listing={listing} onChange={(next) => {
+    if (next) setLoaded({ listing: next, session })
     else navigate('/account?tab=selling', { replace: true, state: { deleted: listing.title } })
   }} />
 }
