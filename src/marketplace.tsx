@@ -5,7 +5,7 @@ import {
   ArrowRight, Camera, Headphones, Heart, ImagePlus, Laptop, MapPin, MessageCircle, Package,
   ShieldCheck, Shirt, Sofa, Tent, TrendingUp, Watch, X,
 } from 'lucide-react'
-import { api } from './api'
+import { api, authSession } from './api'
 import type { Category, ListingSummary, ListingDetail, FavoriteSummary } from './api'
 import { useAuth } from './auth'
 import { badgeFor, badges } from './badge'
@@ -311,8 +311,9 @@ async function collectFavoriteIds() {
   return ids
 }
 
-// The listing detail has no favorited flag yet, so the favorite list is read once per session
-// and kept in sync with this tab's own toggles instead of being scanned on every detail view.
+// Fallback for when the detail answers favorited: null to a signed-in viewer (for example an
+// expired token the server read as anonymous). The favorite list is read once per session and
+// kept in sync with this tab's own toggles instead of being scanned on every detail view.
 let favoriteCache: { session: number; ids: Promise<Set<string>> } | undefined
 
 function favoriteIds(session: number) {
@@ -406,6 +407,8 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
   const [favorite, setFavorite] = useState<FavoriteState>({ value: null, error: '' })
   const [favoriteRetry, setFavoriteRetry] = useState(0)
   const [favoriteBusy, setFavoriteBusy] = useState(false)
+  // favoriteCount is the server's count at load time; this tab's own toggles move it by one.
+  const [countDelta, setCountDelta] = useState(0)
   const [chatBusy, setChatBusy] = useState(false)
   const [chatError, setChatError] = useState('')
   const mounted = useRef(false)
@@ -418,7 +421,7 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
   useEffect(() => {
     if (!auth.authenticated || isOwner) return
     // When the server says whether this viewer favorited the listing, the list scan is skipped.
-    if (listing.favorited !== undefined) {
+    if (typeof listing.favorited === 'boolean') {
       setFavorite({ value: listing.favorited, error: '' })
       return
     }
@@ -445,6 +448,7 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
     try {
       const result = await api.favorite(listing.publicId, !favorite.value)
       rememberFavorite(auth.sessionKey, listing.publicId, result.favorited)
+      if (result.favorited !== favorite.value) setCountDelta((delta) => delta + (result.favorited ? 1 : -1))
       setFavorite({ value: result.favorited, error: '' })
     } catch (cause) {
       setFavorite((current) => ({ ...current, error: errorMessage(cause) }))
@@ -492,11 +496,14 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
         <div><dt>상품 상태</dt><dd>{conditionLabels[listing.itemCondition]}</dd></div>
         <div><dt>등록 지역</dt><dd>{[listing.region.sido, listing.region.sigungu].filter(Boolean).join(' ')}</dd></div>
         <div><dt>등록일</dt><dd>{date.format(new Date(listing.createdAt))}</dd></div>
-        <div><dt>조회</dt><dd>{won.format(listing.viewCount)}{listing.favoriteCount !== undefined && ' · 찜 ' + won.format(listing.favoriteCount)}</dd></div>
+        <div><dt>조회</dt><dd>{won.format(listing.viewCount)} · 찜 {won.format(Math.max(0, listing.favoriteCount + countDelta))}</dd></div>
       </dl>
-      {listing.seller && <div className="mp-seller">
+      {listing.seller ? <div className="mp-seller">
         <span className="mp-avatar" aria-hidden="true">{listing.seller.nickname.slice(0, 1)}</span>
         <span className="stack"><strong>{listing.seller.nickname}</strong><span className="muted">신뢰도 {listing.seller.trustScore.toFixed(1)}</span></span>
+      </div> : <div className="mp-seller">
+        <span className="mp-avatar" aria-hidden="true">?</span>
+        <span className="stack"><strong>판매자 정보 없음</strong><span className="muted">탈퇴했거나 확인할 수 없는 회원이에요.</span></span>
       </div>}
       <div className="mp-detail-description"><h2>상품 설명</h2><p>{listing.description}</p></div>
       {isOwner ? <OwnerActions listing={listing} onChange={onChange} /> : <div className="actions">
@@ -525,27 +532,35 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
 function ListingRequest({ id }: { id: string }) {
   const auth = useAuth()
   const navigate = useNavigate()
-  const [listing, setListing] = useState<ListingDetail | null>(null)
+  // favorited and favoriteCount belong to the viewer the detail was fetched for, so a detail
+  // loaded under another session (logout, a different account) is never shown and is fetched again.
+  const [loaded, setLoaded] = useState<{ listing: ListingDetail; session: number } | null>(null)
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
+  const session = auth.sessionKey
+  const listing = loaded?.session === session ? loaded.listing : null
 
   useEffect(() => {
     const controller = new AbortController()
+    setError('')
     api.listing(id, controller.signal).then((data) => {
-      if (!controller.signal.aborted) setListing(data)
+      if (!controller.signal.aborted) setLoaded({ listing: data, session })
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(errorMessage(cause))
     })
     return () => controller.abort()
-  }, [id, revision])
+  }, [id, revision, session])
 
   if (error) return <div className="mp-state" role="alert"><p>{error}</p><button className="button" onClick={() => {
     setError('')
     setRevision((value) => value + 1)
   }}>다시 시도</button></div>
   if (!listing) return <p className="mp-state" role="status">매물 정보를 불러오는 중입니다.</p>
-  return <ListingDetailContent key={auth.sessionKey} listing={listing} onChange={(next) => {
-    if (next) setListing(next)
+  return <ListingDetailContent key={session} listing={listing} onChange={(next) => {
+    // A sold/delete request from an ended session can finish after the new session's detail
+    // arrived; applying it would hide that detail (session mismatch) with nothing left to refetch.
+    if (authSession.getSnapshot().sessionKey !== session) return
+    if (next) setLoaded({ listing: next, session })
     else navigate('/account?tab=selling', { replace: true, state: { deleted: listing.title } })
   }} />
 }
