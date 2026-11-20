@@ -81,7 +81,7 @@ export interface CursorPage<T> {
 
 export interface FavoriteSummary {
   listing: FavoriteListingRef;
-  notifyBasePrice: number;
+  notifyBasePrice: number | null; // null when the listing is hidden (backend #58)
   favoritedAt: string;
 }
 
