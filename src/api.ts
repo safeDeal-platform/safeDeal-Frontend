@@ -58,10 +58,10 @@ export interface ListingDetail extends ListingRef {
   createdAt: string;
   version: number;
   images?: { url: string; isPrimary?: boolean }[]; // requested
-  seller?: ListingSeller; // requested
   verificationBadge?: string | null; // requested
-  favoriteCount?: number; // requested
-  favorited?: boolean; // proposed: only for a signed-in viewer
+  seller: ListingSeller | null; // null when the seller withdrew or the row is missing
+  favoriteCount: number; // 0 when nobody favorited it; includes the seller's own favorite
+  favorited: boolean | null; // null whenever the server treated the request as anonymous
 }
 
 export interface ListingFilters {
