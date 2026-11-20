@@ -311,8 +311,9 @@ async function collectFavoriteIds() {
   return ids
 }
 
-// The listing detail has no favorited flag yet, so the favorite list is read once per session
-// and kept in sync with this tab's own toggles instead of being scanned on every detail view.
+// Fallback for when the detail answers favorited: null to a signed-in viewer (for example an
+// expired token the server read as anonymous). The favorite list is read once per session and
+// kept in sync with this tab's own toggles instead of being scanned on every detail view.
 let favoriteCache: { session: number; ids: Promise<Set<string>> } | undefined
 
 function favoriteIds(session: number) {
@@ -406,6 +407,8 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
   const [favorite, setFavorite] = useState<FavoriteState>({ value: null, error: '' })
   const [favoriteRetry, setFavoriteRetry] = useState(0)
   const [favoriteBusy, setFavoriteBusy] = useState(false)
+  // favoriteCount is the server's count at load time; this tab's own toggles move it by one.
+  const [countDelta, setCountDelta] = useState(0)
   const [chatBusy, setChatBusy] = useState(false)
   const [chatError, setChatError] = useState('')
   const mounted = useRef(false)
@@ -418,7 +421,7 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
   useEffect(() => {
     if (!auth.authenticated || isOwner) return
     // When the server says whether this viewer favorited the listing, the list scan is skipped.
-    if (listing.favorited !== undefined) {
+    if (typeof listing.favorited === 'boolean') {
       setFavorite({ value: listing.favorited, error: '' })
       return
     }
@@ -445,6 +448,7 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
     try {
       const result = await api.favorite(listing.publicId, !favorite.value)
       rememberFavorite(auth.sessionKey, listing.publicId, result.favorited)
+      if (result.favorited !== favorite.value) setCountDelta((delta) => delta + (result.favorited ? 1 : -1))
       setFavorite({ value: result.favorited, error: '' })
     } catch (cause) {
       setFavorite((current) => ({ ...current, error: errorMessage(cause) }))
@@ -492,11 +496,14 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
         <div><dt>상품 상태</dt><dd>{conditionLabels[listing.itemCondition]}</dd></div>
         <div><dt>등록 지역</dt><dd>{[listing.region.sido, listing.region.sigungu].filter(Boolean).join(' ')}</dd></div>
         <div><dt>등록일</dt><dd>{date.format(new Date(listing.createdAt))}</dd></div>
-        <div><dt>조회</dt><dd>{won.format(listing.viewCount)}{listing.favoriteCount !== undefined && ' · 찜 ' + won.format(listing.favoriteCount)}</dd></div>
+        <div><dt>조회</dt><dd>{won.format(listing.viewCount)} · 찜 {won.format(Math.max(0, listing.favoriteCount + countDelta))}</dd></div>
       </dl>
-      {listing.seller && <div className="mp-seller">
+      {listing.seller ? <div className="mp-seller">
         <span className="mp-avatar" aria-hidden="true">{listing.seller.nickname.slice(0, 1)}</span>
         <span className="stack"><strong>{listing.seller.nickname}</strong><span className="muted">신뢰도 {listing.seller.trustScore.toFixed(1)}</span></span>
+      </div> : <div className="mp-seller">
+        <span className="mp-avatar" aria-hidden="true">?</span>
+        <span className="stack"><strong>판매자 정보 없음</strong><span className="muted">탈퇴했거나 확인할 수 없는 회원이에요.</span></span>
       </div>}
       <div className="mp-detail-description"><h2>상품 설명</h2><p>{listing.description}</p></div>
       {isOwner ? <OwnerActions listing={listing} onChange={onChange} /> : <div className="actions">

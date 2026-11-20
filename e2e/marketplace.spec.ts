@@ -27,6 +27,10 @@ const detail = {
   description: '케이스를 함께 드려요.',
   viewCount: 3,
   version: 0,
+  // 백엔드 #54 응답 모양. 서버가 찜 여부를 모른다고(null) 답하면 찜 목록을 훑어 상태를 찾는다.
+  seller: { publicId: '01JSELLER00000000000000009', nickname: '헤드폰주인', trustScore: 50 },
+  favoriteCount: 1,
+  favorited: null,
 }
 const favoriteSummary = (listing: typeof firstListing) => ({
   listing: { publicId: listing.publicId, title: listing.title, price: listing.price, status: listing.status },

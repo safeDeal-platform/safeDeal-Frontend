@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-// 백엔드가 아직 보내지 않는 필드(사진·판매자·검증 배지·favorited)를 보냈을 때의 화면을 확인한다.
+// 판매자·찜 수·찜 여부는 백엔드 #54 응답 모양 그대로, 사진·검증 배지는 아직 보내지 않는 필드를 보냈을 때의 화면을 확인한다.
 const me = { publicId: '01JSELLER00000000000000001', nickname: '안전거래러', role: 'USER', emailVerified: true, trustScore: 50, accessToken: 'test-access', expiresIn: 900 }
 const pixel = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect width="4" height="3" fill="%23ccc"/></svg>'
 const detail = {
@@ -8,7 +8,7 @@ const detail = {
   category: { code: 'DIGITAL_AUDIO', name: '이어폰·헤드폰', parentName: '디지털기기' }, itemCondition: 'LIKE_NEW',
   region: { sido: '서울특별시', sigungu: '마포구' }, description: '케이스 포함', createdAt: '2026-11-14T00:00:00Z', viewCount: 152, version: 3,
   images: [{ url: pixel, isPrimary: true }, { url: pixel }], verificationBadge: 'APPROVED', favoriteCount: 8,
-  seller: { publicId: me.publicId, nickname: me.nickname, trustScore: 50 },
+  seller: { publicId: me.publicId, nickname: me.nickname, trustScore: 50 }, favorited: null,
 }
 
 test.beforeEach(async ({ page }) => {
@@ -119,6 +119,42 @@ test('다른 사람의 매물은 구매자 버튼을 보여 주고, 서버가 �
   await expect(page.getByRole('button', { name: /찜 해제/ })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByText('신뢰도 72.5')).toBeVisible()
   expect(favoritesRead).toBe(false)
+})
+
+test('판매자가 탈퇴해 seller가 null이면 판매자 정보 없음으로 보여 주고, 구매 버튼은 그대로 둔다', async ({ page }) => {
+  await page.route('**/api/listings/' + detail.publicId, (route) => route.fulfill({ json: { success: true, data: {
+    ...detail, seller: null, favoriteCount: 0, favorited: null,
+  } } }))
+  await page.goto('/listings/' + detail.publicId)
+
+  await expect(page.getByRole('heading', { name: detail.title })).toBeVisible()
+  await expect(page.getByText('판매자 정보 없음')).toBeVisible()
+  await expect(page.getByText(/신뢰도/)).toHaveCount(0)
+  await expect(page.locator('.mp-detail-facts')).toContainText('152 · 찜 0')
+  await expect(page.getByRole('button', { name: /채팅방 열기/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: '삭제' })).toHaveCount(0)
+})
+
+test('로그인했는데 서버가 favorited를 null로 주면 찜 목록에서 상태를 찾아 찜 버튼을 잠그지 않는다', async ({ page }) => {
+  let favoritesRead = false
+  await page.route('**/api/users/me/favorites*', (route) => { favoritesRead = true; return route.fulfill({ json: { success: true, data: {
+    items: [{ listing: { publicId: detail.publicId, title: detail.title, price: detail.price, status: 'ACTIVE' }, notifyBasePrice: detail.price, favoritedAt: '2026-11-18T00:00:00Z' }], nextCursor: null, hasNext: false,
+  } } }) })
+  // 만료된 토큰처럼 서버가 이 요청을 비로그인으로 읽으면 favorited는 null이다.
+  await page.route('**/api/listings/' + detail.publicId, (route) => route.fulfill({ json: { success: true, data: {
+    ...detail, seller: { publicId: '01JOTHER000000000000000001', nickname: '다른사람', trustScore: 72.5 }, favorited: null,
+  } } }))
+  await page.goto('/login')
+  await page.getByLabel('이메일').fill('buyer@example.test')
+  await page.getByLabel('비밀번호', { exact: true }).fill('safe-password')
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.evaluate((id) => { window.history.pushState({}, '', '/listings/' + id); window.dispatchEvent(new PopStateEvent('popstate')) }, detail.publicId)
+
+  const remove = page.getByRole('button', { name: /찜 해제/ })
+  await expect(remove).toHaveAttribute('aria-pressed', 'true')
+  await expect(remove).toBeEnabled()
+  expect(favoritesRead).toBe(true)
 })
 
 test('다른 사람의 매물을 사유와 함께 신고하고, 서버가 거절하면 이유를 안내하고, 접수한 신고는 취소할 수 있다', async ({ page }) => {

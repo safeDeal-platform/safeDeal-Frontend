@@ -13,6 +13,10 @@ const detail = {
   createdAt: '2026-11-07T00:00:00Z',
   viewCount: 7,
   version: 0,
+  // 백엔드 #54 응답 모양. 이 목업은 로그인 여부와 상관없이 favorited를 null로 준다.
+  seller: { publicId: '01JABCDEFGHJKMNPQRSTVWXYZ9', nickname: '헤드폰주인', trustScore: 50 },
+  favoriteCount: 2,
+  favorited: null,
 }
 const categories = [
   { code: 'DIGITAL', name: '디지털기기', parentCode: null, depth: 1, sortOrder: 1 },
@@ -90,11 +94,16 @@ test('로그인 후 같은 매물에서 찜을 추가하고 해제한다', async
   await expect(page.getByRole('heading', { name: detail.title })).toBeVisible()
   const add = page.getByRole('button', { name: '찜하기' })
   const remove = page.getByRole('button', { name: '찜 해제' })
+  const facts = page.locator('.mp-detail-facts')
   await expect(add).toBeEnabled()
+  await expect(facts).toContainText('7 · 찜 2')
   await add.click()
   await expect(remove).toHaveAttribute('aria-pressed', 'true')
+  // 내가 누른 찜은 다시 불러오지 않아도 수에 바로 반영된다.
+  await expect(facts).toContainText('7 · 찜 3')
   await remove.click()
   await expect(add).toHaveAttribute('aria-pressed', 'false')
+  await expect(facts).toContainText('7 · 찜 2')
 })
 
 test('인증 화면에서 로그인하면 인증 화면 대신 매물 목록으로 가고, 로그인 상태로는 로그인 화면에 머물지 않는다', async ({ page }) => {
