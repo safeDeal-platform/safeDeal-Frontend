@@ -15,24 +15,24 @@ import './marketplace.css'
 type Page<T> = { items: T[]; nextCursor: string | null; hasNext: boolean }
 type PageLoader<T> = (cursor: string | undefined, signal: AbortSignal) => Promise<Page<T>>
 
-const won = new Intl.NumberFormat('ko-KR')
+export const won = new Intl.NumberFormat('ko-KR')
 const date = new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Seoul' })
-const conditionLabels = { NEW: '새 상품', LIKE_NEW: '거의 새것', USED: '사용감 있음', HEAVILY_USED: '사용감 많음' }
+export const conditionLabels = { NEW: '새 상품', LIKE_NEW: '거의 새것', USED: '사용감 있음', HEAVILY_USED: '사용감 많음' }
 const statusLabels: Record<string, string> = {
   ACTIVE: '판매중', SOLD: '판매완료', BLOCKED: '거래 불가', DELETED: '삭제된 매물',
   DRAFT: '작성 중', PENDING_VERIFICATION: '검증 대기',
 }
-const regions = [
+export const regions = [
   '서울특별시', '부산광역시', '대구광역시', '인천광역시', '광주광역시', '대전광역시', '울산광역시',
   '세종특별자치시', '경기도', '강원특별자치도', '충청북도', '충청남도', '전북특별자치도',
   '전라남도', '경상북도', '경상남도', '제주특별자치도',
 ]
 
-function errorMessage(error: unknown) {
+export function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
 }
 
-function useCategories() {
+export function useCategories() {
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -391,6 +391,9 @@ function OwnerActions({ listing, onChange }: { listing: ListingDetail; onChange:
         const result = await api.changeListingStatus(listing.publicId, sold ? 'RESTORE_MANUAL_SOLD' : 'MARK_SOLD')
         onChange({ ...listing, status: result.status })
       })}>{sold ? '판매중으로 되돌리기' : '판매완료로 바꾸기'}</button>
+      {/* The backend edits ACTIVE and PENDING_VERIFICATION listings only, and the detail never shows the latter. */}
+      {listing.status === 'ACTIVE' && <Link className="button" to={'/listings/' + encodeURIComponent(listing.publicId) + '/edit'}
+        aria-disabled={step === 'busy'} onClick={(event) => { if (step === 'busy') event.preventDefault() }}>수정</Link>}
       <button type="button" className="button mp-danger" disabled={step === 'busy'} onClick={() => setStep('confirm-delete')}>삭제</button>
     </div>}
     {sold && <p className="mp-note">직접 판매완료로 바꾼 매물은 24시간 안에만 되돌릴 수 있어요.</p>}
@@ -532,6 +535,8 @@ function ListingDetailContent({ listing, onChange }: { listing: ListingDetail; o
 function ListingRequest({ id }: { id: string }) {
   const auth = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const edited = (location.state as { edited?: boolean } | null)?.edited === true
   // favorited and favoriteCount belong to the viewer the detail was fetched for, so a detail
   // loaded under another session (logout, a different account) is never shown and is fetched again.
   const [loaded, setLoaded] = useState<{ listing: ListingDetail; session: number } | null>(null)
@@ -556,13 +561,16 @@ function ListingRequest({ id }: { id: string }) {
     setRevision((value) => value + 1)
   }}>다시 시도</button></div>
   if (!listing) return <p className="mp-state" role="status">매물 정보를 불러오는 중입니다.</p>
-  return <ListingDetailContent key={session} listing={listing} onChange={(next) => {
+  return <>
+    {edited && <p className="service-notice" role="status">매물 정보를 수정했어요.</p>}
+    <ListingDetailContent key={session} listing={listing} onChange={(next) => {
     // A sold/delete request from an ended session can finish after the new session's detail
     // arrived; applying it would hide that detail (session mismatch) with nothing left to refetch.
     if (authSession.getSnapshot().sessionKey !== session) return
     if (next) setLoaded({ listing: next, session })
     else navigate('/account?tab=selling', { replace: true, state: { deleted: listing.title } })
   }} />
+  </>
 }
 
 export function ListingPage() {
@@ -671,7 +679,7 @@ function DraftPhoto({ photo, label, remove }: { photo: File; label: string; remo
   </div>
 }
 
-function formatMoneyInput(value: string, limit: number) {
+export function formatMoneyInput(value: string, limit: number) {
   const digits = value.replace(/[^0-9]/g, '').slice(0, String(limit).length)
   if (!digits) return ''
   const parsed = Number(digits)

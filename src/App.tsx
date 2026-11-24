@@ -3,6 +3,7 @@ import { ArrowLeft, Heart, MessageCircle, Plus, Search, ShieldCheck, ShoppingCar
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api } from './api'
 import { AuthPage, useAuth } from './auth'
+import { ListingEditPage } from './listing-edit'
 import { BrowsePage, FavoritesPage, ListingPage, SellPage } from './marketplace'
 import { AccountPage, CartPage, ChatPage, PricesPage, SupportPage } from './services'
 
@@ -125,6 +126,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<BrowsePage />} />
           <Route path="/listings/:id" element={<ListingPage />} />
+          <Route path="/listings/:id/edit" element={<ListingEditPage />} />
           <Route path="/sell" element={<SellPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
           <Route path="/chat" element={<ChatPage />} />
