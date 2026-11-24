@@ -102,6 +102,61 @@ test('판매중인 내 매물은 상세의 수정 버튼으로 열고, 8개 값�
   }])
 })
 
+test('저장 중에는 입력 칸을 잠가, 보낸 값과 화면 값이 달라져 저장 뒤 입력이 사라지는 일을 막는다', async ({ page }) => {
+  await signIn(page)
+  const { sent, store } = await serve(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => { release = resolve })
+  // 나중에 등록한 route가 먼저 잡는다: PATCH 응답만 붙잡아 두고 GET은 serve로 넘긴다.
+  await page.route('**/api/listings/' + detail.publicId, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    sent.push(route.request().postDataJSON())
+    await held
+    return route.fulfill(store.save(sent[sent.length - 1]))
+  })
+
+  await page.goto(editPath)
+  await page.getByLabel('상품명').fill('보낸 제목')
+  await page.getByRole('button', { name: '수정 저장' }).click()
+  await expect(page.getByRole('button', { name: '저장 중' })).toBeDisabled()
+  await expect(page.getByLabel('상품명')).toBeDisabled()
+  await expect(page.getByLabel('상품 설명')).toBeDisabled()
+  await expect(page.getByLabel('판매 가격')).toBeDisabled()
+
+  release()
+  await expect(page.getByText('매물 정보를 수정했어요.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '보낸 제목' })).toBeVisible()
+  expect(sent).toHaveLength(1)
+})
+
+test('409 뒤 다시 저장하는 중에도 최신 내용으로 바꾸기를 누를 수 없다', async ({ page }) => {
+  await signIn(page)
+  const { sent, store } = await serve(page, {
+    patch: (_, __, s) => {
+      s.current = { ...s.current, price: 220000, version: 4 }
+      return conflict
+    },
+  })
+  let release = () => {}
+  const held = new Promise<void>((resolve) => { release = resolve })
+
+  await page.goto(editPath)
+  await page.getByRole('button', { name: '수정 저장' }).click()
+  await expect(page.getByText('다른 곳에서 먼저 수정됐어요.')).toBeVisible()
+  await page.route('**/api/listings/' + detail.publicId, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    sent.push(route.request().postDataJSON())
+    await held
+    return route.fulfill(store.save(sent[sent.length - 1]))
+  })
+  await page.getByRole('button', { name: '최신 기준으로 다시 저장' }).click()
+  await expect(page.getByRole('button', { name: '최신 내용으로 바꾸기' })).toBeDisabled()
+
+  release()
+  await expect(page.getByText('매물 정보를 수정했어요.')).toBeVisible()
+  expect(sent.map((body) => body.version)).toEqual([3, 4])
+})
+
 test('판매완료 매물에는 수정 버튼이 없고, 수정 주소로 들어와도 폼 대신 이유를 보여 준다', async ({ page }) => {
   await signIn(page)
   await serve(page, { initial: { ...detail, status: 'SOLD' } })

@@ -226,6 +226,7 @@
 
 .mp-sale-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
 .mp-sale-sections, .mp-sale-aside { display: grid; gap: 13px; min-width: 0; }
+.mp-edit-fields { margin: 0; padding: 0; border: 0; }
 .mp-sale-panel { display: grid; gap: 12px; min-width: 0; padding: 17px; }
 .mp-sale-panel :is(h2, h3, p) { margin: 0; overflow-wrap: anywhere; }
 .mp-sale-panel h2 { font-size: 19px; }

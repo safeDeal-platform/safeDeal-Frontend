@@ -223,7 +223,8 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
   const provinces = regions.includes(draft.province) || !draft.province ? regions : [draft.province, ...regions]
 
   return <form className="mp-sale-grid" noValidate onSubmit={(event) => void save(event)}>
-    <div className="mp-sale-sections">
+    {/* Saving sends the values shown at the click; locking the fields keeps the screen equal to what was sent. */}
+    <fieldset className="mp-sale-sections mp-edit-fields" disabled={busy}>
       {conflict && <div className="mp-inline-alert" role="alert">
         <span><strong>다른 곳에서 먼저 수정됐어요.</strong>{' '}
           {conflict.changed.length
@@ -275,7 +276,7 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
             onChange={(event) => update('district', event.target.value)} />{note('regionSigungu')}{fieldError('regionSigungu')}</label>
         </div>
       </section>
-    </div>
+    </fieldset>
     <aside className="mp-sale-aside">
       <section className="panel mp-sale-panel mp-sale-end">
         <p className="eyebrow">수정 중인 매물</p><h2>{draft.title || '상품명을 입력해 주세요'}</h2>
