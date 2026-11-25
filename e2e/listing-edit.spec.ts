@@ -409,6 +409,8 @@ test('저장 응답을 기다리는 중에 머리글 메뉴로 나가도 묻고,
   await expect(page).toHaveURL(new RegExp(editPath + '$'))
   await page.getByRole('button', { name: '계속 고치기' }).click()
 
+  // "저장 중" 표시가 떠도 요청 처리기가 아직 응답을 붙잡지 않았을 수 있어, 붙잡힌 뒤에 풀어 준다.
+  await expect.poll(() => holds.length).toBe(1)
   holds.shift()?.()
   await expect(page.getByText('잠시 후 다시 시도해 주세요.')).toBeVisible()
   await expect(page.getByLabel('상품명')).toHaveValue('보낸 제목')
