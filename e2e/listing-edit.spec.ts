@@ -382,3 +382,45 @@ test('저장에 성공하면 고친 내용이 있어도 묻지 않고 상세로 
   await expect(page.getByRole('heading', { name: '새 제목' })).toBeVisible()
   expect(sent).toHaveLength(1)
 })
+
+test('저장 응답을 기다리는 중에 머리글 메뉴로 나가도 묻고, 저장이 실패하면 입력과 이유를 그대로 보여 준다', async ({ page }) => {
+  await signIn(page)
+  const { sent, store } = await serve(page)
+  const holds: (() => void)[] = []
+  let failNext = true
+  // 나중에 등록한 route가 먼저 잡는다: PATCH 응답을 붙잡아 두었다가 첫 번째는 실패, 두 번째는 저장으로 돌려준다.
+  await page.route('**/api/listings/' + detail.publicId, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    const body = route.request().postDataJSON() as Body
+    sent.push(body)
+    await new Promise<void>((resolve) => holds.push(resolve))
+    if (failNext) { failNext = false; return route.fulfill(fail(500, 'C000', '잠시 후 다시 시도해 주세요.')) }
+    return route.fulfill(store.save(body))
+  })
+  const favorites = page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '찜한 매물' })
+
+  await page.goto(editPath)
+  await page.getByLabel('상품명').fill('보낸 제목')
+  await page.getByRole('button', { name: '수정 저장' }).click()
+  await expect(page.getByRole('button', { name: '저장 중' })).toBeDisabled()
+  // 저장이 끝나기 전에는 실패할 수 있으므로, 나가려 하면 확인을 거친다.
+  await favorites.click()
+  await expect(page.getByText('고친 내용을 버릴까요?')).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(editPath + '$'))
+  await page.getByRole('button', { name: '계속 고치기' }).click()
+
+  holds.shift()?.()
+  await expect(page.getByText('잠시 후 다시 시도해 주세요.')).toBeVisible()
+  await expect(page.getByLabel('상품명')).toHaveValue('보낸 제목')
+  await expect(page).toHaveURL(new RegExp(editPath + '$'))
+
+  // 확인이 떠 있는 동안 저장이 성공하면, 그 이동은 묻지 않고 상세로 간다.
+  await page.getByRole('button', { name: '수정 저장' }).click()
+  await favorites.click()
+  await expect(page.getByText('고친 내용을 버릴까요?')).toBeVisible()
+  await expect.poll(() => holds.length).toBe(1)
+  holds.shift()?.()
+  await expect(page).toHaveURL(detailUrl)
+  await expect(page.getByText('매물 정보를 수정했어요.')).toBeVisible()
+  expect(sent).toHaveLength(2)
+})

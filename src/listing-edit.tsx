@@ -82,8 +82,14 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
   const [reference, setReference] = useState(base)
   const [closed, setClosed] = useState('')
   const [busy, setBusy] = useState(false)
-  const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
+  const mounted = useRef(false)
+  useEffect(() => {
+    // Set on setup, not only at creation: StrictMode and Fast Refresh run cleanup and then setup again.
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  // Set right before the move a successful save makes, so only that move skips the leave question.
+  const saved = useRef(false)
 
   const leaf = categories.find((category) => category.code === draft.categoryCode && category.parentCode !== null)
   const categoriesReady = !loading && !categoryError
@@ -103,9 +109,10 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
   }, [dirty, closed])
 
   // Every in-app way out (취소, header menu, 뒤로, browser back) stops here while edits are unsaved.
-  // A running save is not blocked: it ends by moving to the detail with state.edited.
+  // A save that is still running can fail and keep the edits, so leaving meanwhile asks too;
+  // only the move a successful save makes (to the detail with state.edited) passes.
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    dirty && !busy && !closed && currentLocation.pathname !== nextLocation.pathname)
+    dirty && !saved.current && !closed && currentLocation.pathname !== nextLocation.pathname)
   const leaving = blocker.state === 'blocked'
 
   function update<K extends keyof EditDraft>(field: K, value: EditDraft[K]) {
@@ -166,6 +173,7 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
     try {
       await api.updateListing(base.publicId, input)
       if (!mounted.current || authSession.getSnapshot().sessionKey !== session) return
+      saved.current = true
       navigate('/listings/' + encodeURIComponent(base.publicId), { replace: true, state: { edited: true } })
     } catch (cause) {
       if (!mounted.current || authSession.getSnapshot().sessionKey !== session) return
