@@ -329,3 +329,56 @@ test('고친 내용이 있으면 취소할 때 한 번 묻고, 계속 고치기�
   await expect(page).toHaveURL(detailUrl)
   expect(sent).toHaveLength(0)
 })
+
+test('고친 내용이 있으면 머리글 메뉴로 나갈 때도 같은 확인을 띄우고, 고른 대로 머물거나 나간다', async ({ page }) => {
+  await signIn(page)
+  const { sent } = await serve(page)
+  const favorites = page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '찜한 매물' })
+
+  await page.goto(editPath)
+  await page.getByLabel('상품명').fill('바꾸던 제목')
+  await favorites.click()
+  // 앱 안 이동은 beforeunload가 잡지 못한다. useBlocker가 이동을 붙잡아 주소가 그대로여야 한다.
+  await expect(page.getByText('고친 내용을 버릴까요?')).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(editPath + '$'))
+
+  await page.getByRole('button', { name: '계속 고치기' }).click()
+  await expect(page.getByText('고친 내용을 버릴까요?')).toHaveCount(0)
+  await expect(page).toHaveURL(new RegExp(editPath + '$'))
+  await expect(page.getByLabel('상품명')).toHaveValue('바꾸던 제목')
+
+  // 화면 위 뒤로 버튼도 앱 안 이동이라 같은 확인을 거친다.
+  await page.getByRole('button', { name: '뒤로' }).click()
+  await expect(page.getByText('고친 내용을 버릴까요?')).toBeVisible()
+  await page.getByRole('button', { name: '계속 고치기' }).click()
+  await expect(page).toHaveURL(new RegExp(editPath + '$'))
+
+  await favorites.click()
+  await page.getByRole('button', { name: '버리고 나가기' }).click()
+  await expect(page).toHaveURL(/\/favorites$/)
+  expect(sent).toHaveLength(0)
+})
+
+test('고친 내용이 없으면 머리글 메뉴로 묻지 않고 나간다', async ({ page }) => {
+  await signIn(page)
+  await serve(page)
+
+  await page.goto(editPath)
+  await expect(page.getByLabel('상품명')).toHaveValue(detail.title)
+  await page.getByRole('navigation', { name: '주요 메뉴' }).getByRole('link', { name: '찜한 매물' }).click()
+  await expect(page).toHaveURL(/\/favorites$/)
+  await expect(page.getByText('고친 내용을 버릴까요?')).toHaveCount(0)
+})
+
+test('저장에 성공하면 고친 내용이 있어도 묻지 않고 상세로 옮겨 수정 완료를 알린다', async ({ page }) => {
+  await signIn(page)
+  const { sent } = await serve(page)
+
+  await page.goto(editPath)
+  await page.getByLabel('상품명').fill('새 제목')
+  await page.getByRole('button', { name: '수정 저장' }).click()
+  await expect(page).toHaveURL(detailUrl)
+  await expect(page.getByText('고친 내용을 버릴까요?')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '새 제목' })).toBeVisible()
+  expect(sent).toHaveLength(1)
+})

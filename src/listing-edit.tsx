@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useBlocker, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, api, authSession } from './api'
 import type { ItemCondition, ListingDetail, ListingInput } from './api'
 import { ProfileLoadState, useAuth } from './auth'
@@ -82,7 +82,6 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
   const [reference, setReference] = useState(base)
   const [closed, setClosed] = useState('')
   const [busy, setBusy] = useState(false)
-  const [leaving, setLeaving] = useState(false)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -103,6 +102,12 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty, closed])
 
+  // Every in-app way out (취소, header menu, 뒤로, browser back) stops here while edits are unsaved.
+  // A running save is not blocked: it ends by moving to the detail with state.edited.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    dirty && !busy && !closed && currentLocation.pathname !== nextLocation.pathname)
+  const leaving = blocker.state === 'blocked'
+
   function update<K extends keyof EditDraft>(field: K, value: EditDraft[K]) {
     setDraft((previous) => {
       const next = { ...previous, [field]: value }
@@ -117,7 +122,8 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
       for (const key of touched) delete next[key]
       return next
     })
-    setLeaving(false)
+    // Typing again answers the question: the user is still editing, so the held navigation is dropped.
+    if (blocker.state === 'blocked') blocker.reset()
   }
 
   function validate(): FieldErrors {
@@ -286,11 +292,11 @@ function EditForm({ base, session }: { base: ListingDetail; session: number }) {
         {leaving ? <div className="mp-inline-alert" role="alert">
           <span>고친 내용을 버릴까요?</span>
           <div className="actions">
-            <button type="button" className="button mp-danger" onClick={() => navigate(detailPath)}>버리고 나가기</button>
-            <button type="button" className="button" onClick={() => setLeaving(false)}>계속 고치기</button>
+            <button type="button" className="button mp-danger" onClick={() => blocker.proceed?.()}>버리고 나가기</button>
+            <button type="button" className="button" onClick={() => blocker.reset?.()}>계속 고치기</button>
           </div>
         </div> : <button type="button" className="button" disabled={busy}
-          onClick={() => { if (dirty) setLeaving(true); else navigate(detailPath) }}>취소</button>}
+          onClick={() => navigate(detailPath)}>취소</button>}
       </section>
     </aside>
   </form>
