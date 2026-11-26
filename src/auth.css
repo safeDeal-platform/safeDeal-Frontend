@@ -26,6 +26,17 @@
   margin: 0;
 }
 
+/* 카카오 로그인 버튼 색은 카카오 디자인 가이드의 노란 배경과 검정 85% 글자를 따른다. */
+.button.kakao {
+  border-color: #fee500;
+  background: #fee500;
+  color: rgb(0 0 0 / 85%);
+}
+
+.button.kakao:hover {
+  border-color: #e6cf00;
+}
+
 .auth-message {
   margin: 0;
   border-radius: .5rem;
