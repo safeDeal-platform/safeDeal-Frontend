@@ -226,12 +226,14 @@
 
 .mp-sale-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
 .mp-sale-sections, .mp-sale-aside { display: grid; gap: 13px; min-width: 0; }
+.mp-edit-fields { margin: 0; padding: 0; border: 0; }
 .mp-sale-panel { display: grid; gap: 12px; min-width: 0; padding: 17px; }
 .mp-sale-panel :is(h2, h3, p) { margin: 0; overflow-wrap: anywhere; }
 .mp-sale-panel h2 { font-size: 19px; }
 .mp-sale-panel h3 { font-size: 14px; }
 .mp-sale-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .mp-sale-panel-header p, .mp-sale-panel label small { margin-top: 4px; color: #645b75; font-size: 12px; font-weight: 500; }
+.mp-sale-panel label small.mp-error { color: #a42547; }
 .mp-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
 .mp-photo-picker, .mp-draft-photo { position: relative; min-height: 95px; aspect-ratio: 1.25; border-radius: 10px; overflow: hidden; }
 .mp-photo-picker {
