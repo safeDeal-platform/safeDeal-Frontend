@@ -330,7 +330,7 @@ async function loadProfile(): Promise<void> {
   }
 }
 
-function signIn(path: '/api/auth/login' | '/api/auth/signup', credentials: object) {
+function signIn(path: '/api/auth/login' | '/api/auth/signup' | '/api/auth/oauth/kakao/signup', credentials: object) {
   return serializeAuth(async () => {
     const account = await send<AuthResponse>(path, json('POST', credentials), null);
     sessionVersion++;
@@ -379,6 +379,8 @@ export const authSession = {
   login: (email: string, password: string) => signIn('/api/auth/login', { email, password }),
   signup: (email: string, password: string, nickname: string) =>
     signIn('/api/auth/signup', { email, password, nickname }),
+  /** 카카오로 처음 온 사용자의 가입 마무리. 카카오 정보는 백엔드가 심은 가입 티켓 쿠키(HttpOnly)로 실려 가서 화면은 모른다. */
+  kakaoSignup: (nickname: string) => signIn('/api/auth/oauth/kakao/signup', { nickname }),
   logout() {
     return serializeAuth(async () => {
       try {

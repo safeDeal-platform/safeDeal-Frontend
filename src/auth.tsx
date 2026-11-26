@@ -61,7 +61,7 @@ const titles: Record<AuthPageKind, string> = {
   reset: '새 비밀번호 설정',
 };
 
-function safeReturnTarget(from: unknown, queryTarget: string | null) {
+export function safeReturnTarget(from: unknown, queryTarget: string | null) {
   let target: unknown = from;
   if (from && typeof from === 'object' && 'pathname' in from) {
     const pathname = typeof from.pathname === 'string' ? from.pathname : '';
@@ -79,10 +79,46 @@ function safeReturnTarget(from: unknown, queryTarget: string | null) {
 
 const AUTH_PATHS = new Set([
   '/login', '/signup', '/email/verify', '/auth/email/verify',
-  '/password/reset-request', '/password/reset', '/auth/password/reset',
+  '/password/reset-request', '/password/reset', '/auth/password/reset', '/oauth/callback',
 ]);
 
-function feedback(error: unknown) {
+// 백엔드는 카카오에서 돌아올 주소를 /oauth/callback 하나로 고정한다(요청값으로 받으면 오픈 리다이렉트 통로가 된다).
+// 그래서 떠나기 전에 보던 화면을 이 탭의 저장소에 적어 두고, 돌아와서 safeReturnTarget으로 다시 검사해 쓴다.
+const KAKAO_RETURN_KEY = 'safedeal:kakao-return';
+
+export function readKakaoReturn() {
+  try {
+    return safeReturnTarget(sessionStorage.getItem(KAKAO_RETURN_KEY), null);
+  } catch {
+    return '/';
+  }
+}
+
+export function forgetKakaoReturn() {
+  try {
+    sessionStorage.removeItem(KAKAO_RETURN_KEY);
+  } catch {
+    // Storage can be unavailable (private mode); the screen then returns home.
+  }
+}
+
+/**
+ * 카카오 로그인 시작. fetch가 아니라 화면 이동이어야 한다: 백엔드가 state 쿠키를 심고 카카오 동의 화면으로
+ * 302를 보내는데, fetch는 그 302를 따라 kauth.kakao.com까지 가다 CORS로 막힌다.
+ */
+export function KakaoStartButton({ returnTarget }: { returnTarget: string }) {
+  return (
+    <a className="button kakao" href="/api/auth/oauth/kakao" onClick={() => {
+      try {
+        sessionStorage.setItem(KAKAO_RETURN_KEY, returnTarget);
+      } catch {
+        // Without storage the login still works and lands on the home screen.
+      }
+    }}>카카오로 시작하기</a>
+  );
+}
+
+export function feedback(error: unknown) {
   if (error instanceof ApiError) return error.fieldErrors[0]?.message || error.message;
   if (error instanceof Error) return error.message;
   return '요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -262,11 +298,16 @@ function AuthScreen({ kind }: { kind: AuthPageKind }) {
             <Link to="/password/reset-request" state={returnState}>비밀번호 찾기</Link>
           </nav>
           <div className="auth-social stack">
-            <p className="muted">소셜 로그인 · API 연동 대기</p>
+            <KakaoStartButton returnTarget={returnTarget} />
             <button className="button" type="button" disabled>Google로 계속하기</button>
-            <button className="button" type="button" disabled>카카오로 계속하기</button>
+            <p className="muted">Google 로그인 · API 연동 대기</p>
           </div>
         </>
+      )}
+      {kind === 'signup' && (
+        <div className="auth-social stack">
+          <KakaoStartButton returnTarget={returnTarget} />
+        </div>
       )}
       {kind !== 'login' && (
         <nav className="actions auth-links" aria-label="계정 화면 이동">

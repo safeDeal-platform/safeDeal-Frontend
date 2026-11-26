@@ -3,6 +3,7 @@ import { ArrowLeft, Heart, MessageCircle, Plus, Search, ShieldCheck, ShoppingCar
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api } from './api'
 import { AuthPage, useAuth } from './auth'
+import { KakaoCallbackPage } from './kakao'
 import { ListingEditPage } from './listing-edit'
 import { BrowsePage, FavoritesPage, ListingPage, SellPage } from './marketplace'
 import { AccountPage, CartPage, ChatPage, PricesPage, SupportPage } from './services'
@@ -141,6 +142,7 @@ export function App() {
           <Route path="/password/reset-request" element={<AuthPage kind="reset-request" />} />
           <Route path="/password/reset" element={<AuthPage kind="reset" />} />
           <Route path="/auth/password/reset" element={<AuthPage kind="reset" />} />
+          <Route path="/oauth/callback" element={<KakaoCallbackPage />} />
           <Route path="*" element={<section className="panel stack"><h1>페이지를 찾을 수 없어요</h1><Link to="/" className="button">매물 목록으로</Link></section>} />
         </Routes>
       </main>
