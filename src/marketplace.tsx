@@ -130,12 +130,12 @@ function ListingGraphic({ categoryCode }: { categoryCode?: string }) {
 }
 
 /**
- * 제재·삭제된 매물은 다른 사람에게 제목·가격·상태를 보여 주지 않는다.
- * 목록·상세는 백엔드가 이미 숨기고(목록은 판매중만, 상세는 404), 찜 목록만 남아 있어 여기서 가린다.
- * 제재가 풀릴 수 있으므로 '거래 불가' 같은 낙인 문구도 쓰지 않는다.
+ * 판매중·판매완료가 아닌 매물(제재·삭제·임시저장·검증 대기)은 찜 목록에서 제목·가격을 보여 주지 않는다.
+ * 백엔드 isViewable()과 같은 기준이고(#58), 서버도 이 매물의 제목·가격을 null로 보낸다.
+ * 어느 상태로 가려졌는지 구별되면 제재 사실이 드러나므로 문구는 한 가지만 쓴다.
  */
 function isUnavailable(status: ListingSummary['status']) {
-  return status === 'BLOCKED' || status === 'DELETED'
+  return status !== 'ACTIVE' && status !== 'SOLD'
 }
 
 function ListingCard({ listing, categoryName, children }: {
@@ -610,7 +610,7 @@ function FavoriteResults({ session }: { session: number }) {
             <div className="mp-card-media"><ListingGraphic /></div>
             <div className="mp-card-info">
               <h3>더 이상 볼 수 없는 매물</h3>
-              <span className="muted">판매가 중단됐거나 삭제된 매물이에요.</span>
+              <span className="muted">지금은 공개되지 않은 매물이에요.</span>
             </div>
           </div>
           <div className="mp-card-actions"><button type="button" className="button mp-heart-button" aria-pressed="true"
